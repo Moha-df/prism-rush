@@ -26,6 +26,10 @@ pub enum UiAction {
     VolUp,
     FovDown,
     FovUp,
+    /// Join the n-th game of the public list shown in the menu.
+    JoinListed(u8),
+    /// Copy the host code to the clipboard.
+    CopyCode,
 }
 
 pub const TEXT: Color = Color::srgb(0.95, 0.93, 0.9);

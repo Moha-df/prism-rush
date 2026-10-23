@@ -1,25 +1,29 @@
 //! Networking: who we are (host / client / dedicated), starting the server,
 //! connecting, and the client side of the netcode (prediction, interpolation).
+//!
+//! Transport: **iroh** (QUIC peer-to-peer, dialed by public key). It punches
+//! through home routers (NAT traversal) and falls back to free public relay
+//! servers when a direct path is impossible: no port to open, no account, no
+//! VPN. Friends find the host through the public game list (`discovery`).
 
 pub mod client;
+pub mod discovery;
 pub mod interp;
 pub mod protocol;
 
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, ToSocketAddrs};
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
+use std::str::FromStr;
+use crossbeam_channel::{unbounded as channel, Receiver};
+use std::time::Duration;
 
 use bevy::prelude::*;
-use bevy_quinnet::client::{
-    certificate::CertificateVerificationMode, connection::ClientAddrConfiguration,
-    ClientConnectionConfiguration, ClientConnectionConfigurationDefaultables, QuinnetClient,
-};
-use bevy_quinnet::server::{
-    certificate::CertificateRetrievalMode, EndpointAddrConfiguration, QuinnetServer,
-    ServerEndpointConfiguration, ServerEndpointConfigurationDefaultables,
-};
 use bevy_replicon::prelude::*;
-use bevy_replicon_quinnet::ChannelsConfigurationExt;
+use bevy_replicon_iroh::iroh::endpoint::{presets, EndpointHooks};
+use bevy_replicon_iroh::iroh::{EndpointAddr, EndpointId, SecretKey};
+use bevy_replicon_iroh::{IrohClient, IrohClientConfig, IrohServer, IrohServerConfig, IrohTokioHandle};
 
 use crate::config::{AppConfig, LaunchMode};
+use discovery::Discovery;
 use protocol::{Hello, Welcome, PROTOCOL_VERSION};
 
 /// Our role in the network.
@@ -56,20 +60,51 @@ pub struct LocalPlayer {
     pub slot: Option<u8>,
 }
 
+/// Who to join.
+#[derive(Clone, Debug)]
+pub enum JoinTarget {
+    /// Full address from the public game list (fastest: includes relay + IPs).
+    Addr(EndpointAddr),
+    /// A host code typed or pasted by hand (the host's public key).
+    Code(String),
+    /// Join the first game found in the public list (bots, tests).
+    FirstListed,
+}
+
 /// Requests coming from the UI (or the command line).
 #[derive(Message, Clone, Debug)]
 pub enum NetCommand {
     Host,
-    Join(String),
+    Join(JoinTarget),
     Leave,
 }
 
-/// Last network error, displayed by the menu.
+/// Last network error / progress, displayed by the menu.
 #[derive(Resource, Default, Debug)]
 pub struct NetStatus {
     pub error: Option<String>,
-    pub connecting_since: Option<f64>,
+    pub connecting: bool,
+    /// The code friends can type to join us (our public key), once hosting.
+    pub host_code: Option<String>,
 }
+
+/// The tokio runtime iroh runs on. Must stay alive as long as the app.
+#[derive(Resource)]
+pub struct TokioRuntime(pub tokio::runtime::Runtime);
+
+/// Results of background network operations (they can take seconds: NAT
+/// traversal, relay connection...) so the game never freezes.
+#[derive(Resource, Default)]
+struct Pending {
+    connect: Option<Receiver<Result<IrohClient, String>>>,
+    host_addr: Option<Receiver<EndpointAddr>>,
+    join_first: bool,
+}
+
+/// iroh needs "hooks" (callbacks on connections); we don't use any.
+#[derive(Debug, Clone, Copy)]
+struct NoHooks;
+impl EndpointHooks for NoHooks {}
 
 pub struct NetPlugin;
 
@@ -78,14 +113,15 @@ impl Plugin for NetPlugin {
         app.init_resource::<NetRole>()
             .init_resource::<LocalPlayer>()
             .init_resource::<NetStatus>()
+            .init_resource::<Pending>()
             .add_message::<NetCommand>()
             .add_systems(Startup, auto_launch)
-            .add_systems(Update, handle_net_commands)
+            .add_systems(Update, (handle_net_commands, poll_pending).chain())
             .add_systems(OnEnter(ClientState::Connected), send_hello)
             .add_systems(OnExit(ClientState::Connected), on_connection_lost)
-            .add_systems(Update, check_connect_timeout)
             .add_systems(PreUpdate, receive_welcome.after(ClientSystems::Receive))
-            .add_plugins((client::ClientNetPlugin, interp::InterpPlugin));
+            .add_systems(Last, close_on_exit)
+            .add_plugins((client::ClientNetPlugin, interp::InterpPlugin, discovery::DiscoveryPlugin));
     }
 }
 
@@ -97,35 +133,25 @@ fn auto_launch(config: Res<AppConfig>, mut commands: MessageWriter<NetCommand>) 
             commands.write(NetCommand::Host);
         }
         LaunchMode::Join | LaunchMode::BotClient => {
-            commands.write(NetCommand::Join(config.last_address.clone()));
+            let target = if config.last_address.trim().is_empty() {
+                JoinTarget::FirstListed
+            } else {
+                JoinTarget::Code(config.last_address.clone())
+            };
+            commands.write(NetCommand::Join(target));
         }
     }
 }
 
-/// Resolves "1.2.3.4", "1.2.3.4:7777", "my-pc" or "my-pc:7777".
-pub fn resolve_address(input: &str, default_port: u16) -> Result<SocketAddr, String> {
-    let input = input.trim();
-    if input.is_empty() {
-        return Err("Adresse vide".into());
-    }
-    if let Ok(addr) = input.parse::<SocketAddr>() {
-        return Ok(addr);
-    }
-    if let Ok(ip) = input.parse::<IpAddr>() {
-        return Ok(SocketAddr::new(ip, default_port));
-    }
-    let with_port = if input.contains(':') { input.to_string() } else { format!("{input}:{default_port}") };
-    let addrs: Vec<SocketAddr> = with_port
-        .to_socket_addrs()
-        .map_err(|e| format!("Adresse introuvable '{input}': {e}"))?
-        .collect();
-    // Prefer IPv4: simpler with VPNs like Tailscale.
-    addrs
-        .iter()
-        .find(|a| a.is_ipv4())
-        .or(addrs.first())
-        .copied()
-        .ok_or_else(|| format!("Adresse introuvable '{input}'"))
+/// Parses a host code (iroh public key). Spaces and line breaks are ignored
+/// so a code pasted from a chat still works.
+pub fn parse_code(code: &str) -> Result<EndpointId, String> {
+    let cleaned: String = code.chars().filter(|c| !c.is_whitespace()).collect();
+    EndpointId::from_str(&cleaned).map_err(|_| "Code de partie invalide".to_string())
+}
+
+fn any_addr(port: u16) -> SocketAddr {
+    SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -135,90 +161,209 @@ fn handle_net_commands(
     mut role: ResMut<NetRole>,
     mut status: ResMut<NetStatus>,
     mut local: ResMut<LocalPlayer>,
-    mut config: ResMut<AppConfig>,
-    channels: Res<RepliconChannels>,
-    mut server: ResMut<QuinnetServer>,
-    mut client: ResMut<QuinnetClient>,
-    time: Res<Time<Real>>,
+    mut pending: ResMut<Pending>,
+    mut discovery: ResMut<Discovery>,
+    config: Res<AppConfig>,
+    handle: Res<IrohTokioHandle>,
 ) {
     for cmd in commands_in.read() {
         match cmd {
             NetCommand::Host => {
-                let result = server.start_endpoint(ServerEndpointConfiguration {
-                    // 0.0.0.0 = listen on every network interface (LAN, Tailscale...).
-                    addr_config: EndpointAddrConfiguration::from_ip(Ipv4Addr::UNSPECIFIED, config.port),
-                    cert_mode: CertificateRetrievalMode::GenerateSelfSigned {
-                        server_hostname: "prism-rush".to_string(),
-                    },
-                    defaultables: ServerEndpointConfigurationDefaultables {
-                        send_channels_cfg: channels.server_configs(),
-                    },
+                // A fresh identity each time we host: the code changes, but
+                // friends simply click the game in the list.
+                let result = IrohServer::bind_with(
+                    &handle,
+                    presets::N0,
+                    SecretKey::generate(),
+                    any_addr(config.port),
+                    Vec::new(),
+                    NoHooks,
+                    IrohServerConfig::default(),
+                )
+                // Port busy (another instance)? Let the OS pick one.
+                .or_else(|_| {
+                    IrohServer::bind_with(
+                        &handle,
+                        presets::N0,
+                        SecretKey::generate(),
+                        any_addr(0),
+                        Vec::new(),
+                        NoHooks,
+                        IrohServerConfig::default(),
+                    )
                 });
                 match result {
-                    Ok(_certificate) => {
+                    Ok(server) => {
                         *role = if config.launch == LaunchMode::Dedicated { NetRole::Dedicated } else { NetRole::Host };
                         status.error = None;
-                        info!("server listening on UDP port {} as {:?}", config.port, *role);
+                        status.host_code = Some(server.id().to_string());
+                        info!("hosting: code {} on {:?}", server.id(), server.bound_sockets());
+                        // Wait (in the background) until a relay is reachable,
+                        // then publish our full address in the game list.
+                        let endpoint = server.endpoint().clone();
+                        let (tx, rx) = channel();
+                        handle.0.spawn(async move {
+                            if tokio::time::timeout(Duration::from_secs(8), endpoint.online()).await.is_err() {
+                                warn!("no relay reachable yet: only direct connections will work");
+                            }
+                            let _ = tx.send(endpoint.addr());
+                        });
+                        pending.host_addr = Some(rx);
+                        commands.insert_resource(server);
                     }
                     Err(e) => {
-                        error!("cannot start server: {e}");
-                        status.error = Some(format!("Impossible d'héberger (port {} occupé ?) : {e}", config.port));
+                        error!("cannot host: {e:#}");
+                        status.error = Some(format!("Impossible d'héberger : {e}"));
                     }
                 }
             }
-            NetCommand::Join(address) => {
-                let addr = match resolve_address(address, config.port) {
-                    Ok(a) => a,
-                    Err(e) => {
-                        status.error = Some(e);
+            NetCommand::Join(target) => {
+                let addr = match target {
+                    JoinTarget::Addr(a) => a.clone(),
+                    JoinTarget::Code(code) => match parse_code(code) {
+                        // Only the key: iroh finds the host through its public
+                        // address lookup service.
+                        Ok(id) => EndpointAddr::new(id),
+                        Err(e) => {
+                            status.error = Some(e);
+                            continue;
+                        }
+                    },
+                    JoinTarget::FirstListed => {
+                        pending.join_first = true;
+                        *role = NetRole::Client;
+                        status.connecting = true;
+                        status.error = None;
+                        info!("waiting for a game in the public list...");
                         continue;
                     }
                 };
-                let bind_ip: IpAddr =
-                    if addr.is_ipv4() { Ipv4Addr::UNSPECIFIED.into() } else { Ipv6Addr::UNSPECIFIED.into() };
-                let result = client.open_connection(ClientConnectionConfiguration {
-                    addr_config: ClientAddrConfiguration::from_ips(addr.ip(), addr.port(), bind_ip, 0),
-                    // Self-signed certificate on the host: we skip verification
-                    // (fine for a game between friends; the link is still encrypted).
-                    cert_mode: CertificateVerificationMode::SkipVerification,
-                    defaultables: ClientConnectionConfigurationDefaultables {
-                        send_channels_cfg: channels.client_configs(),
-                    },
-                });
-                match result {
-                    Ok(_) => {
-                        *role = NetRole::Client;
-                        status.error = None;
-                        status.connecting_since = Some(time.elapsed_secs_f64());
-                        config.last_address = address.clone();
-                        if !config.headless {
-                            config.save();
-                        }
-                        info!("connecting to {addr}");
-                    }
-                    Err(e) => status.error = Some(format!("Connexion impossible : {e}")),
-                }
+                start_connect(&handle, addr, &mut pending);
+                *role = NetRole::Client;
+                status.connecting = true;
+                status.error = None;
             }
             NetCommand::Leave => {
                 info!("leaving the game");
-                if server.is_listening() {
-                    let _ = server.stop_endpoint();
-                }
-                client.close_all_connections();
+                discovery.withdraw();
                 *role = NetRole::Offline;
                 local.slot = None;
-                status.connecting_since = None;
-                // Server-side entities must be cleaned by us (clients' copies are
-                // removed by replicon when the connection closes).
+                status.connecting = false;
+                status.host_code = None;
+                pending.connect = None;
+                pending.host_addr = None;
+                pending.join_first = false;
+                // Close the connection in the background (it may wait a bit
+                // for a clean goodbye) so the game doesn't freeze.
+                commands.queue(|world: &mut World| {
+                    let handle = world.resource::<IrohTokioHandle>().clone();
+                    if let Some(server) = world.remove_resource::<IrohServer>() {
+                        let h = handle.clone();
+                        std::thread::spawn(move || server.shutdown(&h));
+                    }
+                    if let Some(client) = world.remove_resource::<IrohClient>() {
+                        std::thread::spawn(move || client.disconnect(&handle));
+                    }
+                });
+                // Server-side entities must be cleaned by us.
                 commands.run_system_cached(crate::game::lobby::despawn_all_game_entities);
             }
         }
     }
 }
 
-fn send_hello(mut hello: MessageWriter<Hello>, config: Res<AppConfig>, mut status: ResMut<NetStatus>) {
+fn start_connect(handle: &IrohTokioHandle, addr: EndpointAddr, pending: &mut Pending) {
+    info!("connecting to {}", addr.id);
+    let handle = handle.clone();
+    let (tx, rx) = channel();
+    std::thread::spawn(move || {
+        let result = IrohClient::connect_with(
+            &handle,
+            presets::N0,
+            SecretKey::generate(),
+            any_addr(0),
+            addr,
+            Vec::new(),
+            NoHooks,
+            IrohClientConfig { connect_timeout: Duration::from_secs(25), ..default() },
+        )
+        .map_err(|e| format!("{e:#}"));
+        let _ = tx.send(result);
+    });
+    pending.connect = Some(rx);
+}
+
+/// Picks up the results of background operations.
+fn poll_pending(
+    mut commands: Commands,
+    mut pending: ResMut<Pending>,
+    mut status: ResMut<NetStatus>,
+    mut role: ResMut<NetRole>,
+    mut discovery: ResMut<Discovery>,
+    handle: Res<IrohTokioHandle>,
+) {
+    if let Some(rx) = &pending.host_addr
+        && let Ok(addr) = rx.try_recv()
+    {
+        info!("server online: relay {:?}, {} direct address(es)", addr.relay_urls().next(), addr.ip_addrs().count());
+        discovery.my_addr = Some(addr);
+        pending.host_addr = None;
+    }
+    if pending.join_first {
+        if let Some((_, ad)) = discovery.open_games().into_iter().find(|(_, ad)| ad.players < ad.max_players) {
+            info!("joining listed game '{}'", ad.name);
+            pending.join_first = false;
+            start_connect(&handle, ad.addr, &mut pending);
+        }
+        return;
+    }
+    if let Some(rx) = &pending.connect
+        && let Ok(result) = rx.try_recv()
+    {
+        pending.connect = None;
+        status.connecting = false;
+        if *role != NetRole::Client {
+            // The player cancelled while we were connecting.
+            if let Ok(client) = result {
+                let h = handle.clone();
+                std::thread::spawn(move || client.disconnect(&h));
+            }
+            return;
+        }
+        match result {
+            Ok(client) => {
+                info!("connected to the host");
+                commands.insert_resource(client);
+            }
+            Err(e) => {
+                warn!("connection failed: {e}");
+                status.error = Some(
+                    "Impossible de rejoindre la partie (l'hôte est-il toujours en ligne ? partie pleine ?)".into(),
+                );
+                *role = NetRole::Offline;
+            }
+        }
+    }
+}
+
+/// On quit, close the connection cleanly (tells the other side right away
+/// instead of letting it time out). Exclusive system: needs the whole world.
+fn close_on_exit(world: &mut World) {
+    let quitting = world.resource::<Messages<AppExit>>().iter_current_update_messages().next().is_some();
+    if !quitting {
+        return;
+    }
+    let handle = world.resource::<IrohTokioHandle>().clone();
+    if let Some(server) = world.remove_resource::<IrohServer>() {
+        server.shutdown(&handle);
+    }
+    if let Some(client) = world.remove_resource::<IrohClient>() {
+        client.disconnect(&handle);
+    }
+}
+
+fn send_hello(mut hello: MessageWriter<Hello>, config: Res<AppConfig>) {
     info!("connected, sending hello as '{}'", config.name);
-    status.connecting_since = None;
     hello.write(Hello { name: config.name.clone(), version: PROTOCOL_VERSION });
 }
 
@@ -240,34 +385,10 @@ fn receive_welcome(
     }
 }
 
-fn on_connection_lost(
-    role: Res<NetRole>,
-    mut status: ResMut<NetStatus>,
-    mut commands: MessageWriter<NetCommand>,
-) {
+fn on_connection_lost(role: Res<NetRole>, mut status: ResMut<NetStatus>, mut commands: MessageWriter<NetCommand>) {
     if *role == NetRole::Client {
         warn!("connection to the host lost");
         status.error = Some("Connexion à l'hôte perdue.".into());
-        commands.write(NetCommand::Leave);
-    }
-}
-
-fn check_connect_timeout(
-    role: Res<NetRole>,
-    state: Res<State<ClientState>>,
-    time: Res<Time<Real>>,
-    mut status: ResMut<NetStatus>,
-    mut commands: MessageWriter<NetCommand>,
-) {
-    let Some(since) = status.connecting_since else { return };
-    if *role != NetRole::Client || *state.get() == ClientState::Connected {
-        return;
-    }
-    if time.elapsed_secs_f64() - since > 8.0 {
-        status.error = Some(
-            "Délai de connexion dépassé. Vérifie l'adresse, que l'hôte a lancé la partie, et Tailscale.".into(),
-        );
-        status.connecting_since = None;
         commands.write(NetCommand::Leave);
     }
 }
@@ -277,10 +398,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn resolves_addresses() {
-        assert_eq!(resolve_address("127.0.0.1", 7777).unwrap(), "127.0.0.1:7777".parse().unwrap());
-        assert_eq!(resolve_address("10.0.0.2:9000", 7777).unwrap(), "10.0.0.2:9000".parse().unwrap());
-        assert_eq!(resolve_address("localhost", 7777).unwrap().port(), 7777);
-        assert!(resolve_address("", 7777).is_err());
+    fn parses_host_codes() {
+        let id = SecretKey::generate().public();
+        let code = id.to_string();
+        assert_eq!(parse_code(&code).unwrap(), id);
+        // Pasted with spaces / line breaks.
+        let messy = format!(" {}\n{} ", &code[..10], &code[10..]);
+        assert_eq!(parse_code(&messy).unwrap(), id);
+        assert!(parse_code("pas un code").is_err());
     }
 }

@@ -1,19 +1,21 @@
-PRISM RUSH - pour rejoindre la partie d'un ami
-==============================================
+PRISM RUSH - rejoindre la partie d'un ami
+==========================================
 
-1. Installe Tailscale (une seule fois) : double-clique sur installer_tailscale.bat
-   (ou telecharge-le sur https://tailscale.com/download/windows), puis connecte-toi
-   avec un compte Google, Microsoft ou GitHub.
+1. Dezippe ce dossier n'importe ou.
+2. Double-clique sur Jouer.bat (ou directement sur prism_rush.exe).
+3. Dans le menu, ta partie d'ami apparait sous "Parties ouvertes" :
+   clique sur "Rejoindre". C'est tout !
 
-2. Accepte l'invitation Tailscale que ton ami (l'hote) t'a envoyee
-   (un lien "Share" : ouvre-le et clique sur "Accept").
+Rien a installer, pas de compte, pas de configuration.
 
-3. Quand l'hote a lance la partie, double-clique sur jouer.bat,
-   tape l'adresse qu'il te donne (100.x.y.z) dans "Rejoindre" et clique sur Rejoindre.
-   (ou : rejoindre.bat 100.x.y.z)
+Si Windows affiche "Windows a protege votre ordinateur" : clique sur
+"Informations complementaires" puis "Executer quand meme".
+Si le pare-feu demande l'autorisation : clique sur "Autoriser".
+S'il manque VCRUNTIME140.dll : installe https://aka.ms/vs/17/release/vc_redist.x64.exe
 
-Si Windows dit qu'il manque VCRUNTIME140.dll, installe :
-https://aka.ms/vs/17/release/vc_redist.x64.exe
+Si la partie n'apparait pas dans la liste : demande a ton ami de cliquer sur
+"Copier le code" dans son salon, de te l'envoyer, colle-le (Ctrl+V) dans le champ
+"code de la partie" du menu, puis clique sur Rejoindre.
 
 Controles : ZQSD bouger, Espace sauter (double saut), Maj sprint, Ctrl glisser,
 A dash, clic gauche tirer, clic droit zoomer, R recharger, E ouvrir/reanimer,

@@ -18,90 +18,66 @@ sons sont générés par le code.
 
 | Script | Rôle |
 |---|---|
-| `jouer.bat` | Menu principal : Solo, Héberger ou Rejoindre |
+| `jouer.bat` | Menu principal : Solo, Héberger, liste des parties ouvertes |
 | `heberger.bat` | Héberge directement une partie (`heberger.bat 2` ajoute 2 bots) |
-| `rejoindre.bat 100.x.y.z` | Rejoint directement une partie |
-| `scripts\installer_tailscale.bat` | Installe Tailscale (jeu en ligne) |
-| `scripts\autoriser_pare_feu.bat` | Ouvre le port UDP 7777 dans le pare-feu **Windows** (à lancer en administrateur si besoin) |
 | `scripts\paquet_amis.bat` | Crée `dist\PrismRush.zip` à envoyer à tes amis |
 | `scripts\serveur_dedie.bat` | Serveur sans fenêtre (personne ne joue sur ce PC) |
-| `scripts\test_bots.bat` | Test automatique : serveur + bots + client bot réseau |
+| `scripts\test_bots.bat` | Test automatique : serveur + bots + client bot qui rejoint par Internet |
 
 ---
 
-## 2. Jouer en ligne avec un ami, sans ouvrir de port sur ta box
+## 2. Jouer en ligne avec un ami
 
-### Le principe
+**Rien à installer, pas de compte, pas de port à ouvrir sur la box.**
 
-Ta box bloque les connexions entrantes, et ouvrir un port est pénible et risqué. On utilise
-**[Tailscale](https://tailscale.com)**, un VPN gratuit qui relie directement vos PC comme s'ils
-étaient sur le même réseau local, quelles que soient vos box. Chaque PC reçoit une adresse
-`100.x.y.z`. Ton ami se connecte à la tienne, et Tailscale traverse les box tout seul : il passe
-par un relais si une connexion directe est impossible.
+### Une seule fois : envoyer le jeu à ton ami
 
-Pourquoi ce choix :
-- **C'est fiable.** Ça marche derrière quasiment toutes les box, y compris en 4G.
-- **C'est gratuit.** Jusqu'à 6 utilisateurs, et le partage de machine est inclus.
-- **Le jeu n'a rien de spécial à gérer** : pour lui, c'est un simple réseau local.
+1. Double-clique sur `scripts\paquet_amis.bat`. Il crée **`dist\PrismRush.zip`** (≈ 35 Mo).
+2. Envoie ce zip à ton ami (Discord, WeTransfer, Google Drive…).
 
-### Étapes pour TOI (l'hôte), une seule fois
-
-1. **Installer Tailscale** : double-clique sur `scripts\installer_tailscale.bat`, ou télécharge-le
-   sur <https://tailscale.com/download/windows>. Sur ce PC, il est déjà installé (adresse détectée :
-   `100.112.81.107`).
-2. **Te connecter** : clique sur l'icône Tailscale près de l'horloge, puis **Log in**
-   (compte Google, Microsoft ou GitHub).
-3. **Partager ton PC avec ton ami** :
-   - ouvre la console <https://login.tailscale.com/admin/machines> ;
-   - sur la ligne de ton PC, clique sur **⋯** puis **Share…** ;
-   - onglet **Copy invite link**, puis **Copy share link** ;
-   - envoie ce lien à ton ami (Discord, SMS…). Il est personnel, ne le publie pas.
-
-   *Alternative : **Users → Invite users** l'ajoute à ton réseau Tailscale complet. Le partage de
-   machine est plus prudent : il ne voit que ce PC.*
-4. **Créer le paquet du jeu pour ton ami** : double-clique sur `scripts\paquet_amis.bat`, puis
-   envoie-lui `dist\PrismRush.zip` (WeTransfer, Google Drive, Discord…).
-   ⚠️ **Après chaque mise à jour du jeu, renvoie-lui un nouveau zip** : les deux versions doivent
-   être identiques, sinon la connexion est refusée (« version du jeu différente »).
-
-### Étapes pour TON AMI, une seule fois
-
-1. Dézipper `PrismRush.zip` où il veut.
-2. Installer Tailscale (`installer_tailscale.bat` dans le dossier, ou le site) et **se connecter**
-   avec son propre compte.
-3. **Ouvrir le lien de partage** que tu lui as envoyé, puis **Accept**. Ton PC apparaît alors dans
-   sa liste Tailscale.
-
-Il n'a pas besoin d'installer Rust : le zip contient l'exécutable prêt à l'emploi.
-Si Windows signale qu'il manque `VCRUNTIME140.dll`, il faut installer
-<https://aka.ms/vs/17/release/vc_redist.x64.exe>.
+⚠️ **Après chaque mise à jour du jeu, renvoie-lui un nouveau zip.** Les deux versions doivent être
+identiques : une version différente n'apparaît pas dans la liste.
 
 ### À chaque partie
 
-1. **Toi** : lance `heberger.bat` (ou `jouer.bat` → **Héberger**). Le salon affiche l'adresse à
-   donner, du type **`Internet (Tailscale) : 100.112.81.107`**.
-2. **Windows peut afficher « Autoriser l'accès ? » pour le pare-feu** au premier lancement : coche
-   **réseaux privés ET publics**, puis **Autoriser**. Si tu as cliqué Annuler par erreur, lance
-   `scripts\autoriser_pare_feu.bat` en administrateur (clic droit → *Exécuter en tant
-   qu'administrateur*).
-3. **Ton ami** : `jouer.bat`, puis il colle ton adresse dans **Rejoindre** (Ctrl+V fonctionne)
-   et clique sur **Rejoindre**. Il peut aussi faire `rejoindre.bat 100.112.81.107`.
-4. Son nom apparaît dans ton salon. Clique sur **Lancer la partie**.
+1. **Toi** : `jouer.bat`, puis **Héberger**. Le salon indique « Ta partie est en ligne ! » au bout
+   de quelques secondes.
+2. **Ton ami** : il dézippe, double-clique sur **`Jouer.bat`**. Ta partie apparaît dans
+   **« Parties ouvertes »** (« Partie de *ton pseudo* »). Il clique sur **Rejoindre**.
+3. Son nom apparaît dans ton salon. Clique sur **Lancer la partie**.
 
-Les joueurs peuvent aussi rejoindre une partie déjà en cours.
+On peut aussi rejoindre une partie déjà en cours.
 
-### Si ça ne se connecte pas
+**Plan B**, si la partie n'apparaît pas dans la liste : dans ton salon, clique sur **Copier le code**
+et envoie-le à ton ami. Il le colle (Ctrl+V) dans le champ du menu, puis clique sur **Rejoindre**.
+
+### Comment ça marche (sans serveur ni port ouvert)
+
+- **Connexion : [iroh](https://www.iroh.computer/).** Chaque partie a une identité
+  (une clé publique) au lieu d'une adresse IP.
+  - Iroh perce les box des deux côtés (« NAT traversal ») pour une connexion directe pair à pair.
+  - Si c'est impossible (certaines box ou la 4G), il passe automatiquement par un **relais public
+    gratuit** (de l'entreprise n0, sans compte), avec un peu plus de latence.
+  - La connexion est chiffrée de bout en bout.
+- **Liste des parties : brokers MQTT publics et gratuits** (HiveMQ et EMQX, les deux en même temps
+  pour la fiabilité).
+  - L'hôte y publie une petite annonce : nom, nombre de joueurs, comment le joindre.
+  - Les menus des autres joueurs lisent ces annonces.
+  - Si l'hôte quitte ou plante, l'annonce disparaît d'elle-même.
+  - Seule cette annonce passe par là, jamais le jeu lui-même.
+- La liste est **publique** : n'importe quel joueur de Prism Rush peut voir et rejoindre une partie
+  ouverte. C'est sans risque (il n'y a que ton pseudo), et tu peux quitter le salon à tout moment.
+
+### Si ça ne marche pas
 
 | Symptôme | Solution |
 |---|---|
-| « Délai de connexion dépassé » | Vérifier que **Tailscale est connecté des deux côtés** (icône active) et que l'ami voit ton PC dans sa liste. Tester avec `ping 100.x.y.z` dans un terminal chez l'ami. |
-| Le ping marche mais pas le jeu | Pare-feu Windows de l'hôte : lancer `scripts\autoriser_pare_feu.bat` en administrateur. |
-| « version du jeu différente » | Renvoyer un `PrismRush.zip` à jour (`scripts\paquet_amis.bat`). |
-| « Impossible d'héberger (port occupé ?) » | Une autre instance du jeu tourne encore : la fermer (Gestionnaire des tâches). |
-| Même réseau local (même box) | Pas besoin de Tailscale : utiliser l'adresse « Même réseau local » affichée dans le salon. |
-
-*Autres VPN possibles : ZeroTier ou Radmin VPN fonctionnent aussi. N'importe quel outil qui crée
-un réseau local virtuel convient : il suffit de donner l'IP correspondante.*
+| Windows : « Windows a protégé votre ordinateur » | **Informations complémentaires**, puis **Exécuter quand même** (l'exe n'est pas signé). |
+| Le pare-feu Windows demande l'autorisation | Cliquer **Autoriser** (réseaux privés et publics). |
+| La partie n'apparaît pas dans la liste | Utiliser le plan B (**Copier le code**). Vérifier que vous avez bien la même version du zip. |
+| « Impossible de rejoindre la partie » | L'hôte est-il toujours dans le salon ? Réessayer. Un pare-feu d'entreprise ou d'école peut bloquer l'UDP. |
+| Ça « lag » un peu | La connexion passe par le relais (box très restrictive). C'est jouable, juste un peu moins réactif. |
+| Il manque `VCRUNTIME140.dll` | Installer <https://aka.ms/vs/17/release/vc_redist.x64.exe>. |
 
 ---
 
@@ -169,7 +145,7 @@ pour esquiver.
 cargo test --lib                     # 67 tests : monde déterministe, mouvement, armes, économie, réseau...
 cargo clippy --all-targets           # aucun avertissement
 cargo run --release -- server --headless --bots 3 --autostart --duration 120   # partie sans fenêtre
-cargo run --release -- bot 127.0.0.1                                           # client bot réseau
+cargo run --release -- bot                                                     # client bot : rejoint la 1re partie de la liste
 cargo run --release -- solo --autopilot --shots captures                       # captures d'écran auto
 ```
 

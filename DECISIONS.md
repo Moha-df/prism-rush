@@ -10,7 +10,9 @@ le code. Les plus récents sont en bas de chaque section.
 | Rust | 1.99.1 stable, édition 2024 | Installé via rustup (MSVC déjà présent sur la machine). |
 | `bevy` | 0.20.0 (sortie le 2026-10-08) | Dernière stable. Feature `serialize` pour que `Vec3` soit sérialisable (réseau). |
 | `bevy_replicon` | 0.45 | Réplication serveur → clients, maintenue, déjà compatible Bevy 0.20. |
-| `bevy_replicon_quinnet` / `bevy_quinnet` | 0.21 / 0.22 | Transport QUIC (UDP chiffré). Le backend `renet` n'était **pas encore** porté sur Bevy 0.20. |
+| `bevy_replicon_iroh` / `iroh` | 0.20 / 1.3 | Transport QUIC pair-à-pair par clé publique, traversée de NAT + relais publics (remplace quinnet, voir plus bas). |
+| `rumqttc` | 0.25 | Client MQTT pour la liste publique des parties. |
+| `tokio` | 1 | Runtime asynchrone requis par iroh. |
 | `clap` | 4 | Ligne de commande (`host`, `join`, `server --headless`, `bot`...). |
 
 **Alternative écartée : lightyear 0.31.** Il fournit prédiction et interpolation clés en main, mais
@@ -103,15 +105,31 @@ Exemples utilisés : `first_person_view_model`, `fog`, `generate_custom_mesh`, `
 
 ## Jeu en ligne sans ouvrir de port
 
-- **Tailscale** (VPN maillé gratuit) plutôt que :
-  - playit.gg : l'UDP semblait réservé à l'offre payante, avec des retours de fiabilité mitigés ;
-  - Steam Networking : demande Steam et un AppID ;
-  - WebRTC : demande un serveur de signalisation, et échoue derrière certains NAT.
-- Tailscale traverse les NAT, avec repli sur relais, et le jeu le voit comme un réseau local.
-- Le salon affiche automatiquement l'IP Tailscale (`tailscale ip -4`) et l'IP locale.
-- Partage de machine (« Share ») plutôt qu'invitation dans tout le réseau : l'ami ne voit que ce PC.
-- Le serveur écoute sur `0.0.0.0` (toutes les interfaces). QUIC (quinnet) chiffre la connexion,
-  avec un certificat auto-signé et une vérification ignorée côté client (acceptable entre amis).
+**Exigence** : l'ami dézippe, lance, voit la partie dans une liste et clique. Pas d'installation, pas
+de compte, pas de port à ouvrir, pas de serveur à payer.
+
+1re version : Tailscale (VPN). Fiable, mais il fallait installer un logiciel et créer un compte :
+refusé. Version actuelle :
+
+- **iroh** (`bevy_replicon_iroh`) remplace quinnet. On se connecte à une **clé publique**, pas à une
+  IP. Iroh fait la traversée de NAT et se replie sur les **relais publics gratuits de n0** si le
+  direct échoue. Le reste du netcode (replicon, prédiction, interpolation) n'a pas changé d'une
+  ligne : c'est l'intérêt d'une couche transport interchangeable.
+- **Annuaire des parties = MQTT public** (HiveMQ + EMQX en parallèle). Chaque instance publie un
+  message *retenu* sur `prismrush/v<version>/games/<id>` (JSON : nom, joueurs, `EndpointAddr` iroh
+  complète avec relais et IP directes). Un *last will* efface l'annonce si l'hôte disparaît ;
+  l'annonce est rafraîchie toutes les 5 s et ignorée au-delà de 45 s. Le numéro de version est dans
+  le sujet : les versions différentes ne se voient pas.
+- Alternatives écartées :
+  - Steam : demande Steam et un AppID ;
+  - WebRTC/matchbox : demande d'héberger un serveur de signalisation ;
+  - playit.gg : l'hôte doit configurer un tunnel, et l'UDP était payant ;
+  - pkarr/DHT : permet de trouver une adresse, pas de lister des parties.
+- Les opérations réseau longues (connexion, mise en ligne) tournent **en arrière-plan** (thread +
+  canal `crossbeam`) : le jeu ne gèle jamais. Leçon Rust : une ressource Bevy doit être `Sync`, ce
+  que n'est pas `std::sync::mpsc::Receiver` (contrairement à celui de crossbeam).
+- Test de bout en bout : un serveur headless s'annonce, un client bot le trouve dans la liste,
+  se connecte via iroh et joue 60 s sans aucune correction de prédiction.
 
 ## Vérification sans jouer
 

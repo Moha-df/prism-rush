@@ -11,7 +11,7 @@ use bevy::prelude::*;
 use bevy::state::app::StatesPlugin;
 use bevy::window::{PresentMode, WindowLevel, WindowResolution};
 use bevy_replicon::prelude::*;
-use bevy_replicon_quinnet::RepliconQuinnetPlugins;
+use bevy_replicon_iroh::{IrohTokioHandle, RepliconIrohPlugins};
 use clap::{Parser, Subcommand};
 
 use prism_rush::config::{AppConfig, LaunchMode};
@@ -49,8 +49,8 @@ enum Command {
         #[arg(long, default_value_t = 0)]
         bots: u8,
     },
-    /// Joins a game. ADDR = IP or name of the host (e.g. 100.101.102.103).
-    Join { addr: String },
+    /// Joins a game by its code (shown in the host's lobby).
+    Join { code: String },
     /// Solo game (host without waiting in the lobby).
     Solo {
         #[arg(long, default_value_t = 0)]
@@ -68,10 +68,11 @@ enum Command {
         #[arg(long)]
         seed: Option<u64>,
     },
-    /// Headless client controlled by a bot (network test).
+    /// Headless client controlled by a bot (network test). Without a code,
+    /// joins the first game of the public list.
     Bot {
-        #[arg(default_value = "127.0.0.1")]
-        addr: String,
+        #[arg(default_value = "")]
+        code: String,
     },
 }
 
@@ -150,8 +151,8 @@ fn main() {
             config.bots = bots;
             LaunchMode::Host
         }
-        Command::Join { addr } => {
-            config.last_address = addr;
+        Command::Join { code } => {
+            config.last_address = code;
             LaunchMode::Join
         }
         Command::Solo { bots } => {
@@ -166,8 +167,8 @@ fn main() {
             config.seed = seed;
             LaunchMode::Dedicated
         }
-        Command::Bot { addr } => {
-            config.last_address = addr;
+        Command::Bot { code } => {
+            config.last_address = code;
             config.headless = true;
             config.name = format!("Bot-{}", std::process::id() % 1000);
             LaunchMode::BotClient
@@ -208,7 +209,15 @@ fn main() {
         }));
     }
 
-    app.add_plugins((RepliconPlugins, RepliconQuinnetPlugins))
+    // iroh (the network library) is asynchronous and runs on a tokio runtime.
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .enable_all()
+        .build()
+        .expect("tokio runtime");
+    app.insert_resource(IrohTokioHandle(runtime.handle().clone()))
+        .insert_resource(net::TokioRuntime(runtime));
+    app.add_plugins((RepliconPlugins, RepliconIrohPlugins))
         // Same fixed tick everywhere: 60 Hz simulation + replication.
         .insert_resource(Time::<Fixed>::from_hz(shared::movement::TICK_HZ));
     net::protocol::register_protocol(&mut app);

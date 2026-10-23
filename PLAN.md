@@ -3,7 +3,7 @@
 Jeu : FPS roguelike coopératif 1–4 joueurs, map procédurale infinie, mobs en continu,
 coffres d'objets/armes, réanimation, game over avec stats.
 
-Stack : **Bevy 0.20** · **bevy_replicon 0.45** (réplication) · **bevy_replicon_quinnet 0.21**
+Stack : **Bevy 0.20** · **bevy_replicon 0.45** (réplication) · **bevy_replicon_iroh 0.20** (iroh 1.3)
 (transport QUIC/UDP) · pas d'assets externes (modèles, sons, terrain générés en code).
 
 ## Jalons
@@ -16,7 +16,7 @@ Stack : **Bevy 0.20** · **bevy_replicon 0.45** (réplication) · **bevy_replico
 | J4 | Coffres d'objets et d'armes, 15 bonus, 6 armes, scaling prix & difficulté | ✅ |
 | J5 | Map infinie par chunks (seed partagée, déterministe) | ✅ |
 | J6 | Modèles procéduraux (joueurs, 5+ monstres, armes, coffres, décor), animations, juice | ✅ |
-| J7 | Jeu en ligne sans ouverture de port (Tailscale) + guide README + scripts .bat | ✅ |
+| J7 | Jeu en ligne sans port ni installation (iroh + liste publique) + README + scripts .bat | ✅ |
 | J8 | Polish, équilibrage, menus, écran de fin, bots, mode headless | 🟡 menus, écran de fin, bots, headless faits ; équilibrage et éclairage à affiner |
 
 ## Vérification sans jouer

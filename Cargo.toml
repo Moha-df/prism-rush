@@ -5,11 +5,14 @@ edition = "2024"
 
 [dependencies]
 bevy = { version = "0.20", features = ["serialize", "system_clipboard", "system_font_discovery"] }
-bevy_quinnet = { version = "0.22", default-features = false, features = ["client", "server"] }
 bevy_replicon = "0.45"
-bevy_replicon_quinnet = "0.21"
+bevy_replicon_iroh = "0.20"
 clap = { version = "4.6.7", features = ["derive"] }
+crossbeam-channel = "0.5"
+rumqttc = { version = "0.25", default-features = false }
 serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tokio = { version = "1.54.1", features = ["rt-multi-thread"] }
 
 # Compile our own code with light optimizations (fast iteration),
 # but dependencies (Bevy...) fully optimized: otherwise the game is very slow in debug.
