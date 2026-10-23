@@ -65,6 +65,11 @@ fn setup_server_match(
             level: 1,
             tick: 0,
             boss_alive: false,
+            wave: 1,
+            wave_phase: WavePhase::Break,
+            wave_timer: 0.0,
+            enemies_left: 0,
+            wave_spawning: false,
         },
     ));
     let mut slot = 0u8;
@@ -216,6 +221,12 @@ pub fn start_match(
     info.level = 1;
     info.tick = tick.0;
     info.boss_alive = false;
+    // First wave starts after a short grace period.
+    info.wave = 0;
+    info.wave_phase = WavePhase::Break;
+    info.wave_timer = 5.0;
+    info.enemies_left = 0;
+    info.wave_spawning = false;
 
     for (entity, player) in &players {
         commands
@@ -268,8 +279,8 @@ fn advance_match_clock(
     tick.0 += 1;
     let n = players.iter().count() as u32;
     info.elapsed += time.delta_secs();
-    info.difficulty = economy::difficulty(info.elapsed, n);
-    info.level = economy::monster_level(info.difficulty);
+    info.difficulty = economy::wave_difficulty(info.wave, n);
+    info.level = economy::monster_level(info.wave);
     info.tick = tick.0;
 }
 
@@ -289,7 +300,7 @@ fn check_game_over(
         return;
     }
     info.phase = Phase::GameOver;
-    let mut summary = RunSummary { duration: info.elapsed, level: info.level, players: Vec::new() };
+    let mut summary = RunSummary { duration: info.elapsed, level: info.wave, players: Vec::new() };
     for (player, _, score, items) in &players {
         summary.players.push(PlayerSummary {
             slot: player.slot,
@@ -305,7 +316,7 @@ fn check_game_over(
     }
     summary.players.sort_by_key(|p| p.slot);
     info!(
-        "=== GAME OVER after {:.0}s, level {} — {} ===",
+        "=== GAME OVER after {:.0}s, wave {} — {} ===",
         summary.duration,
         summary.level,
         summary

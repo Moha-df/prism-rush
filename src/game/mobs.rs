@@ -1,8 +1,9 @@
-//! Monsters (server): the spawn *director* and per-type AI.
+//! Monsters (server): the wave *director* and per-type AI.
 //!
-//! The director earns "credits" over time (faster at higher difficulty and
-//! with more players) and spends them to spawn monsters around the players,
-//! like Risk of Rain 2. Every few minutes a boss appears.
+//! Each wave has a spawn budget. The director spends it in small packs around
+//! the players (like Risk of Rain 2's director, but per wave). When the
+//! budget is spent and the last monster dies, the wave is cleared, a short
+//! break follows, then the next wave starts. Every 5th wave adds a boss.
 
 use bevy::prelude::*;
 use bevy_replicon::prelude::*;
@@ -16,19 +17,22 @@ use crate::shared::mobs::MobKind;
 use crate::shared::movement::{move_body, DT, GRAVITY, PLAYER_HEIGHT};
 use crate::shared::rng::Rng;
 
-/// Spawn budget and timers.
+/// Wave state that only the server needs.
 #[derive(Resource)]
 pub struct Director {
-    pub credits: f32,
+    /// Spawn budget left for the current wave.
+    pub budget: f32,
     pub spawn_timer: f32,
-    pub boss_timer: f32,
+    pub boss_pending: bool,
+    /// Seconds since every monster of the wave has been spawned.
+    pub clearing_time: f32,
     pub rng: Rng,
     pub spawned: u32,
 }
 
 impl Default for Director {
     fn default() -> Self {
-        Self { credits: 3.0, spawn_timer: 4.0, boss_timer: economy::BOSS_INTERVAL, rng: Rng::new(0xD1EC), spawned: 0 }
+        Self { budget: 0.0, spawn_timer: 2.0, boss_pending: false, clearing_time: 0.0, rng: Rng::new(0xD1EC), spawned: 0 }
     }
 }
 
@@ -48,15 +52,16 @@ pub struct MobAi {
     pub stuck: f32,
 }
 
-const DESPAWN_DISTANCE: f32 = 130.0;
 const ACID_GRAVITY: f32 = 18.0;
 
 pub struct MobsPlugin;
 
 impl Plugin for MobsPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Director>()
-            .add_systems(FixedUpdate, (director, mob_ai, separate_mobs).chain().in_set(ServerSet::Mobs));
+        app.init_resource::<Director>().add_systems(
+            FixedUpdate,
+            (director, bring_back_stragglers, mob_ai, separate_mobs).chain().in_set(ServerSet::Mobs),
+        );
     }
 }
 
@@ -74,7 +79,21 @@ pub fn spawn_mob(commands: &mut Commands, kind: MobKind, pos: Vec3, level: u32, 
         .id()
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Boss of a boss wave.
+pub fn boss_for_wave(_wave: u32) -> MobKind {
+    MobKind::Colossus
+}
+
+/// A random point on a ring around one of `anchors`, on the ground.
+fn ring_point(terrain: &TerrainRes, rng: &mut Rng, anchors: &[Vec3], min: f32, max: f32) -> Vec3 {
+    let anchor = *rng.pick(anchors);
+    let angle = rng.range(0.0, std::f32::consts::TAU);
+    let d = rng.range(min, max);
+    let x = anchor.x + angle.cos() * d;
+    let z = anchor.z + angle.sin() * d;
+    Vec3::new(x, terrain.wgen.ground_height(x, z), z)
+}
+
 fn director(
     mut commands: Commands,
     mut dir: ResMut<Director>,
@@ -90,70 +109,116 @@ fn director(
         return;
     }
     let n_players = players.iter().count() as u32;
-    let difficulty = info.difficulty;
-    let level = info.level;
-    dir.credits += economy::director_credit_rate(difficulty, n_players) * DT;
-    dir.spawn_timer -= DT;
-    dir.boss_timer -= DT;
-
-    let ring_point = |rng: &mut Rng, min: f32, max: f32| -> Vec3 {
-        let anchor = *rng.pick(&alive);
-        let angle = rng.range(0.0, std::f32::consts::TAU);
-        let d = rng.range(min, max);
-        let x = anchor.x + angle.cos() * d;
-        let z = anchor.z + angle.sin() * d;
-        Vec3::new(x, terrain.wgen.ground_height(x, z), z)
-    };
-
-    // Boss.
-    if dir.boss_timer <= 0.0 && !info.boss_alive {
-        dir.boss_timer = economy::BOSS_INTERVAL;
-        let pos = ring_point(&mut dir.rng, 35.0, 45.0);
-        spawn_mob(&mut commands, MobKind::Colossus, pos, level, tick.0, 0.0);
-        info.boss_alive = true;
-        events.write(ToClients { targets: SendTargets::All, message: GameEvent::BossSpawned });
-        info!("BOSS spawned at {pos:?}");
-    }
-
     let alive_mobs = mobs.iter().count();
-    if dir.spawn_timer > 0.0 || alive_mobs >= economy::max_alive_monsters(n_players, difficulty) {
-        return;
-    }
-    dir.spawn_timer = dir.rng.range(1.2, 3.5) / difficulty.sqrt();
+    info.enemies_left = alive_mobs as u16;
 
-    // Choose a monster type among unlocked ones we can afford.
-    let elapsed = info.elapsed;
-    let options: Vec<MobKind> = MobKind::SPAWNABLE
-        .into_iter()
-        .filter(|k| k.def().unlock_time <= elapsed && k.def().cost <= dir.credits)
-        .collect();
-    if options.is_empty() {
+    match info.wave_phase {
+        WavePhase::Break => {
+            info.wave_timer -= DT;
+            if info.wave_timer > 0.0 {
+                return;
+            }
+            // --- Start the next wave.
+            info.wave += 1;
+            info.wave_phase = WavePhase::Fighting;
+            let wave = info.wave;
+            dir.budget = economy::wave_budget(wave, n_players);
+            dir.boss_pending = economy::is_boss_wave(wave);
+            dir.clearing_time = 0.0;
+            dir.spawn_timer = 1.0;
+            info.wave_spawning = true;
+            info!("=== wave {wave} (budget {:.0}{}) ===", dir.budget, if dir.boss_pending { ", BOSS" } else { "" });
+            events.write(ToClients {
+                targets: SendTargets::All,
+                message: GameEvent::WaveStarted { wave, boss: dir.boss_pending },
+            });
+        }
+        WavePhase::Fighting => {
+            let wave = info.wave;
+            let level = economy::monster_level(wave);
+            dir.spawn_timer -= DT;
+
+            // The boss of a boss wave arrives a few seconds in.
+            if dir.boss_pending && dir.spawn_timer <= 0.0 {
+                dir.boss_pending = false;
+                let pos = ring_point(&terrain, &mut dir.rng, &alive, 35.0, 45.0);
+                spawn_mob(&mut commands, boss_for_wave(wave), pos, level, tick.0, 0.0);
+                info.boss_alive = true;
+                events.write(ToClients { targets: SendTargets::All, message: GameEvent::BossSpawned });
+                info!("BOSS spawned at {pos:?}");
+            }
+
+            info.wave_spawning = dir.budget > 0.0 || dir.boss_pending;
+            if !info.wave_spawning {
+                dir.clearing_time += DT;
+                if alive_mobs == 0 {
+                    // --- Wave cleared!
+                    info.wave_phase = WavePhase::Break;
+                    info.wave_timer = economy::WAVE_BREAK;
+                    info!("wave {wave} cleared");
+                    events.write(ToClients { targets: SendTargets::All, message: GameEvent::WaveCleared { wave } });
+                }
+                return;
+            }
+            if dir.budget <= 0.0 || dir.spawn_timer > 0.0 || alive_mobs >= economy::max_alive_monsters(n_players, wave) {
+                return;
+            }
+            dir.spawn_timer = economy::spawn_interval(wave) * dir.rng.range(0.7, 1.3);
+
+            // Choose a monster type among those unlocked at this wave.
+            let options: Vec<MobKind> = MobKind::SPAWNABLE.into_iter().filter(|k| k.def().unlock_wave <= wave).collect();
+            let weights: Vec<f32> = options.iter().map(|k| k.def().spawn_weight).collect();
+            let kind = options[dir.rng.weighted_index(&weights)];
+            let cost = kind.def().cost;
+            // A small pack of the same type (the last pack may overspend a bit).
+            let pack = dir.rng.range_u32(1, 5).min((dir.budget / cost).ceil() as u32).max(1);
+            let center = ring_point(&terrain, &mut dir.rng, &alive, 28.0, 45.0);
+            for i in 0..pack {
+                let offset = Vec3::new(dir.rng.range(-3.0, 3.0), 0.0, dir.rng.range(-3.0, 3.0));
+                let mut pos = center + offset;
+                pos.y = terrain.wgen.ground_height(pos.x, pos.z) + if kind.def().flying { 6.0 } else { 0.2 };
+                let phase = dir.rng.range(0.0, 100.0);
+                spawn_mob(&mut commands, kind, pos, level, tick.0, phase + i as f32);
+                dir.budget -= cost;
+                dir.spawned += 1;
+            }
+        }
+    }
+}
+
+/// Monsters too far from every player, or the last ones of a wave that
+/// survive too long, are brought back next to the players: the wave can
+/// always be finished, nobody has to hunt a lost monster across the map.
+fn bring_back_stragglers(
+    mut dir: ResMut<Director>,
+    info: Single<&MatchInfo>,
+    players: Query<(&PlayerState, &Health)>,
+    mut mobs: Query<(&Mob, &mut MobState, &mut MobAi)>,
+    terrain: Res<TerrainRes>,
+    mut fx: MessageWriter<ToClients<Fx>>,
+) {
+    let alive: Vec<Vec3> = players.iter().filter(|(_, h)| !h.downed).map(|(s, _)| s.sim.mv.pos).collect();
+    if alive.is_empty() || info.wave_phase != WavePhase::Fighting {
         return;
     }
-    let weights: Vec<f32> = options
-        .iter()
-        .map(|k| match k {
-            MobKind::Skitter => 3.0,
-            MobKind::Spitter => 2.0,
-            MobKind::Wisp => 2.0,
-            MobKind::Bomber => 1.4,
-            MobKind::Brute => 1.0,
-            MobKind::Colossus => 0.0,
-        })
-        .collect();
-    let kind = options[dir.rng.weighted_index(&weights)];
-    let cost = kind.def().cost;
-    // Spawn a small pack of the same type.
-    let pack = dir.rng.range_u32(1, 5).min((dir.credits / cost) as u32).max(1);
-    let center = ring_point(&mut dir.rng, 28.0, 45.0);
-    for i in 0..pack {
-        let offset = Vec3::new(dir.rng.range(-3.0, 3.0), 0.0, dir.rng.range(-3.0, 3.0));
-        let mut pos = center + offset;
-        pos.y = terrain.wgen.ground_height(pos.x, pos.z) + if kind.def().flying { 6.0 } else { 0.2 };
-        let phase = dir.rng.range(0.0, 100.0);
-        spawn_mob(&mut commands, kind, pos, level, tick.0, phase + i as f32);
-        dir.credits -= cost;
-        dir.spawned += 1;
+    // Time rule only once the whole wave has spawned. Re-armed every 10 s so
+    // a fleeing monster is not warped every single tick.
+    let too_long = !info.wave_spawning && dir.clearing_time > economy::STRAGGLER_TIME;
+    if too_long {
+        dir.clearing_time = economy::STRAGGLER_TIME - 10.0;
+    }
+    for (mob, mut state, mut ai) in &mut mobs {
+        let nearest = alive.iter().map(|p| p.distance(state.pos)).fold(f32::INFINITY, f32::min);
+        if nearest > economy::STRAGGLER_DISTANCE || (too_long && nearest > 15.0) {
+            let from = state.pos;
+            let mut to = ring_point(&terrain, &mut dir.rng, &alive, 16.0, 24.0);
+            if mob.kind.def().flying {
+                to.y += 5.0;
+            }
+            state.pos = to;
+            ai.vel = Vec3::ZERO;
+            fx.write(ToClients { targets: SendTargets::All, message: Fx::Warp { from, to } });
+        }
     }
 }
 
@@ -180,7 +245,6 @@ fn mob_ai(
         .filter(|(_, _, h)| !h.downed)
         .map(|(e, s, _)| (e, s.sim.mv.pos, s.sim.mv.vel))
         .collect();
-    let all_players: Vec<Vec3> = players.iter().map(|(_, s, _)| s.sim.mv.pos).collect();
 
     for (entity, mob, mut state, mut ai, mut history, health) in &mut mobs {
         if health.hp <= 0.0 {
@@ -192,12 +256,6 @@ fn mob_ai(
         ai.cooldown -= DT;
         ai.attack_anim = (ai.attack_anim - DT).max(0.0);
         ai.retarget -= DT;
-
-        // Too far from everyone: despawn (the director will spawn closer ones).
-        if !all_players.iter().any(|p| p.distance(state.pos) < DESPAWN_DISTANCE) && !mob.kind.is_boss() {
-            commands.entity(entity).try_despawn();
-            continue;
-        }
 
         // Pick the nearest standing player.
         if ai.retarget <= 0.0 || ai.target.is_none_or(|t| !targets.iter().any(|(e, _, _)| *e == t)) {

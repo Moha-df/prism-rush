@@ -61,6 +61,11 @@ struct HurtVignette;
 struct PauseMenu;
 #[derive(Component)]
 struct PauseValues;
+#[derive(Component)]
+struct WaveBanner(f32);
+/// Marker following one of the last monsters of a wave.
+#[derive(Component)]
+struct EnemyMarker(Entity);
 
 /// A label following a 3D entity on screen (names, chest prices).
 #[derive(Component)]
@@ -90,6 +95,8 @@ impl Plugin for HudPlugin {
                     place_world_labels,
                     toggle_pause,
                     pause_actions,
+                    wave_banner,
+                    enemy_markers,
                 )
                     .run_if(in_state(AppState::InGame)),
             );
@@ -248,6 +255,18 @@ fn spawn_hud(mut commands: Commands) {
     commands.spawn((label("", 22.0, TEXT), PromptText, ChildOf(mid)));
     commands.spawn((bar(220.0, 8.0, Color::srgb(0.4, 0.95, 0.6), PromptBar), ChildOf(mid)));
 
+    // Center-top: big wave banner (fades out).
+    commands.spawn((
+        WaveBanner(0.0),
+        Text::new(""),
+        bold(64.0),
+        TextColor(Color::NONE),
+        TextShadow { offset: Vec2::splat(4.0), ..default() },
+        Node { position_type: PositionType::Absolute, top: Val::Percent(22.0), width: Val::Percent(100.0), justify_content: JustifyContent::Center, ..default() },
+        TextLayout::justify(Justify::Center),
+        ChildOf(root),
+    ));
+
     // Right: toasts.
     commands.spawn((
         ToastList,
@@ -288,6 +307,15 @@ fn spawn_hud(mut commands: Commands) {
             button("Quitter la partie", UiAction::Leave, 308.0),
         ],
     ));
+}
+
+pub fn chest_color(kind: economy::ChestKind) -> Color {
+    match kind {
+        economy::ChestKind::Small => crate::render::palette::GOLD,
+        economy::ChestKind::Large => crate::render::palette::GLOW_ORANGE,
+        economy::ChestKind::Legendary => crate::render::palette::GLOW_MAGENTA,
+        economy::ChestKind::Weapon => crate::render::palette::TEAL_GLOW,
+    }
 }
 
 /// Only touches the text if it really changed: rewriting a `Text` every frame
@@ -332,14 +360,30 @@ fn update_vitals(
     if let (Ok(m), Ok(mut t)) = (info.single(), run.single_mut()) {
         let secs = m.elapsed as u32;
         set_text(&mut t, format!(
-            "{:02}:{:02}   Niveau {}   ·   Coffre {} or   ·   Arme {} or",
+            "VAGUE {}   ·   {}   ·   {:02}:{:02}\nCoffres : petit {} · grand {} · arme {} or",
+            m.wave.max(1),
+            wave_status(m),
             secs / 60,
             secs % 60,
-            m.level,
-            economy::chest_price(economy::ChestKind::Item, m.difficulty),
-            economy::chest_price(economy::ChestKind::Weapon, m.difficulty)
+            economy::chest_price(economy::ChestKind::Small, m.wave),
+            economy::chest_price(economy::ChestKind::Large, m.wave),
+            economy::chest_price(economy::ChestKind::Weapon, m.wave)
         ));
     }
+}
+
+/// Short text describing the wave progress.
+fn wave_status(m: &MatchInfo) -> String {
+    match m.wave_phase {
+        WavePhase::Break if m.wave == 0 => format!("début dans {:.0} s", m.wave_timer.max(0.0).ceil()),
+        WavePhase::Break => format!("pause : vague suivante dans {:.0} s", m.wave_timer.max(0.0).ceil()),
+        WavePhase::Fighting if m.wave_spawning => format!("{} ennemis (d'autres arrivent)", m.enemies_left),
+        WavePhase::Fighting => format!("{} ennemi{} restant{}", m.enemies_left, plural(m.enemies_left), plural(m.enemies_left)),
+    }
+}
+
+fn plural(n: u16) -> &'static str {
+    if n > 1 { "s" } else { "" }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -464,12 +508,9 @@ fn update_prompt(
             .filter(|(c, o)| !o.opened && c.pos.distance(pos + Vec3::Y * 0.5) < INTERACT_RANGE)
             .min_by(|a, b| a.0.pos.distance(pos).total_cmp(&b.0.pos.distance(pos)))
         {
-            let difficulty = info.single().map(|m| m.difficulty).unwrap_or(1.0);
-            let price = economy::chest_price(chest.kind, difficulty);
-            let what = match chest.kind {
-                economy::ChestKind::Item => "coffre d'objet",
-                economy::ChestKind::Weapon => "coffre d'arme",
-            };
+            let wave = info.single().map(|m| m.wave).unwrap_or(1);
+            let price = economy::chest_price(chest.kind, wave);
+            let what = chest.kind.name();
             text = if wallet.gold >= price {
                 format!("[E] Ouvrir le {what} — {price} or")
             } else {
@@ -568,6 +609,14 @@ fn toasts_from_events(
             GameEvent::Revived { slot } => (format!("{} est de retour !", name(*slot)), Color::srgb(0.4, 1.0, 0.6)),
             GameEvent::BossSpawned => ("Un COLOSSE approche !".to_string(), crate::render::palette::GLOW_ORANGE),
             GameEvent::BossKilled => ("Le Colosse est tombé !".to_string(), crate::render::palette::GOLD),
+            GameEvent::WaveStarted { wave, boss } => (
+                if *boss { format!("Vague {wave} — un BOSS approche !") } else { format!("Vague {wave} !") },
+                crate::render::palette::GLOW_ORANGE,
+            ),
+            GameEvent::WaveCleared { wave } => (
+                format!("Vague {wave} terminée ! Pause de {:.0} s pour acheter", economy::WAVE_BREAK),
+                Color::srgb(0.4, 1.0, 0.6),
+            ),
             GameEvent::GameOver(_) => continue,
         };
         commands.spawn((
@@ -581,6 +630,81 @@ fn toasts_from_events(
             ChildOf(list),
             children![label(text, 18.0, color)],
         ));
+    }
+}
+
+fn wave_banner(
+    mut events: MessageReader<GameEvent>,
+    time: Res<Time>,
+    mut banner: Query<(&mut WaveBanner, &mut Text, &mut TextColor)>,
+) {
+    let Ok((mut b, mut text, mut color)) = banner.single_mut() else { return };
+    for ev in events.read() {
+        match ev {
+            GameEvent::WaveStarted { wave, boss } => {
+                text.0 = if *boss { format!("VAGUE {wave}\nBOSS") } else { format!("VAGUE {wave}") };
+                color.0 = if *boss { crate::render::palette::GLOW_MAGENTA } else { ACCENT };
+                b.0 = 2.5;
+            }
+            GameEvent::WaveCleared { wave } => {
+                text.0 = format!("VAGUE {wave} TERMINÉE");
+                color.0 = Color::srgb(0.4, 1.0, 0.6);
+                b.0 = 2.5;
+            }
+            _ => {}
+        }
+    }
+    b.0 = (b.0 - time.delta_secs()).max(0.0);
+    color.0.set_alpha(b.0.min(1.0));
+}
+
+/// When only a few monsters are left, show where they are (even through walls).
+fn enemy_markers(
+    mut commands: Commands,
+    info: Query<&MatchInfo>,
+    mobs: Query<(Entity, &GlobalTransform, &Mob)>,
+    camera: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
+    mut markers: Query<(Entity, &EnemyMarker, &mut Node, &mut Visibility, &mut Text)>,
+) {
+    let show = info.single().is_ok_and(|m| m.wave_phase == WavePhase::Fighting && !m.wave_spawning && m.enemies_left <= 3);
+    let Ok((camera, cam_t)) = camera.single() else { return };
+    // Spawn a marker per monster when needed.
+    if show {
+        for (e, _, _) in &mobs {
+            if !markers.iter().any(|(_, m, ..)| m.0 == e) {
+                commands.spawn((
+                    DespawnOnExit(AppState::InGame),
+                    EnemyMarker(e),
+                    Text::new("▼"),
+                    bold(22.0),
+                    TextColor(Color::srgb(1.0, 0.3, 0.3)),
+                    TextShadow::default(),
+                    Node { position_type: PositionType::Absolute, ..default() },
+                    Visibility::Hidden,
+                ));
+            }
+        }
+    }
+    for (marker_entity, marker, mut node, mut vis, mut text) in &mut markers {
+        let Ok((_, t, mob)) = mobs.get(marker.0) else {
+            commands.entity(marker_entity).try_despawn();
+            continue;
+        };
+        if !show {
+            *vis = Visibility::Hidden;
+            continue;
+        }
+        let world = t.translation() + Vec3::Y * (mob.kind.def().height + 0.8);
+        let dist = world.distance(cam_t.translation());
+        match camera.world_to_viewport(cam_t, world) {
+            Ok(p) => {
+                node.left = Val::Px(p.x - 12.0);
+                node.top = Val::Px(p.y - 30.0);
+                *vis = Visibility::Inherited;
+                set_text(&mut text, format!("▼ {dist:.0} m"));
+            }
+            Err(_) => *vis = Visibility::Hidden,
+        }
     }
 }
 
@@ -619,16 +743,13 @@ fn spawn_world_labels(
             Visibility::Hidden,
         ));
     }
-    let difficulty = info.single().map(|m| m.difficulty).unwrap_or(1.0);
+    let wave = info.single().map(|m| m.wave).unwrap_or(1);
     for (e, c) in &chests {
-        let color = match c.kind {
-            economy::ChestKind::Item => crate::render::palette::GOLD,
-            economy::ChestKind::Weapon => crate::render::palette::TEAL_GLOW,
-        };
+        let color = chest_color(c.kind);
         commands.spawn((
             DespawnOnExit(AppState::InGame),
             WorldLabel { target: e, height: 1.4, max_distance: 25.0 },
-            Text::new(format!("{}", economy::chest_price(c.kind, difficulty))),
+            Text::new(format!("{}", economy::chest_price(c.kind, wave))),
             bold(16.0),
             TextColor(color),
             TextShadow::default(),
@@ -647,7 +768,7 @@ fn place_world_labels(
     mut labels: Query<(Entity, &WorldLabel, &mut Node, &mut Visibility, &mut Text, &ComputedNode)>,
 ) {
     let Ok((camera, cam_t)) = camera.single() else { return };
-    let difficulty = info.single().map(|m| m.difficulty).unwrap_or(1.0);
+    let wave = info.single().map(|m| m.wave).unwrap_or(1);
     for (e, label, mut node, mut vis, mut text, computed) in &mut labels {
         let Ok((target, chest, open)) = targets.get(label.target) else {
             commands.entity(e).try_despawn();
@@ -664,7 +785,7 @@ fn place_world_labels(
             continue;
         }
         if let Some(c) = chest {
-            let s = format!("{} or", economy::chest_price(c.kind, difficulty));
+            let s = format!("{} or", economy::chest_price(c.kind, wave));
             if text.0 != s {
                 text.0 = s;
             }

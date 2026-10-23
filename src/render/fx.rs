@@ -246,6 +246,11 @@ fn on_server_fx(
                 }
             }
             Fx::Gold { .. } => {}
+            Fx::Warp { from, to } => {
+                burst(&mut commands, &mut cache, &mut meshes, &mut materials, rng, *from + Vec3::Y, 12, palette::GLOW_MAGENTA, 4.0, 4.0, 0.12, 0.5, -1.0);
+                burst(&mut commands, &mut cache, &mut meshes, &mut materials, rng, *to + Vec3::Y, 16, palette::GLOW_MAGENTA, 4.0, 5.0, 0.12, 0.6, -1.0);
+                sfx.write(PlaySfx { volume: 0.7, ..PlaySfx::at(Sfx::Pad, *to) });
+            }
         }
     }
 }
@@ -284,6 +289,12 @@ fn on_game_events(
             }
             GameEvent::BossKilled => {
                 sfx.write(PlaySfx::ui(Sfx::ChestOpen));
+            }
+            GameEvent::WaveStarted { boss, .. } => {
+                sfx.write(PlaySfx::ui(if *boss { Sfx::BossRoar } else { Sfx::Telegraph }));
+            }
+            GameEvent::WaveCleared { .. } => {
+                sfx.write(PlaySfx::ui(Sfx::Revived));
             }
             GameEvent::GameOver(_) => {}
         }

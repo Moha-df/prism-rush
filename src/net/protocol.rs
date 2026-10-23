@@ -17,7 +17,7 @@ use crate::shared::weapons::WeaponKind;
 pub const DEFAULT_PORT: u16 = 7777;
 pub const MAX_PLAYERS: usize = 4;
 /// Protocol version: bump when messages change, so old clients are refused.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 
 // ---------------------------------------------------------------------------
 // Replicated components
@@ -28,6 +28,15 @@ pub enum Phase {
     Lobby,
     Playing,
     GameOver,
+}
+
+/// Where we are within the current wave.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WavePhase {
+    /// Monsters are coming / alive.
+    Fighting,
+    /// Short pause between waves.
+    Break,
 }
 
 /// Global state of the match, on a single replicated entity.
@@ -42,6 +51,15 @@ pub struct MatchInfo {
     /// Server simulation tick (60 Hz), used by clients to sync their clock.
     pub tick: u32,
     pub boss_alive: bool,
+    /// Current wave number (1-based).
+    pub wave: u32,
+    pub wave_phase: WavePhase,
+    /// Break: seconds before the next wave.
+    pub wave_timer: f32,
+    /// Monsters alive right now.
+    pub enemies_left: u16,
+    /// More monsters of this wave are still to come.
+    pub wave_spawning: bool,
 }
 
 /// Identity of a player: slot (0..4, also picks the color) and name.
@@ -205,6 +223,8 @@ pub enum Fx {
     MobAttack { pos: Vec3, kind: MobKind },
     PlayerHurt { slot: u8, amount: u16 },
     Gold { amount: u32 },
+    /// A straggler monster was brought back near the players.
+    Warp { from: Vec3, to: Vec3 },
 }
 
 /// Server -> clients: important events (reliable).
@@ -215,6 +235,8 @@ pub enum GameEvent {
     Revived { slot: u8 },
     BossSpawned,
     BossKilled,
+    WaveStarted { wave: u32, boss: bool },
+    WaveCleared { wave: u32 },
     GameOver(Box<RunSummary>),
 }
 

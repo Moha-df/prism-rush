@@ -289,7 +289,7 @@ fn colossus() -> Part {
 
 pub fn chest(kind: ChestKind) -> Part {
     match kind {
-        ChestKind::Item => {
+        ChestKind::Small => {
             let lid = Part::pivot()
                 .at(0.0, 0.55, 0.35)
                 .tag(AnimTag::Lid)
@@ -302,6 +302,38 @@ pub fn chest(kind: ChestKind) -> Part {
                 .with(Part::cube(1.04, 0.07, 0.74).at(0.0, 0.48, 0.0).color(GOLD))
                 .with(Part::cube(0.16, 0.2, 0.05).at(0.0, 0.42, -0.37).color(GOLD))
                 .with(Part::sphere(0.5).at(0.0, 0.45, 0.0).color(GOLD).glow(3.0))
+                .with(lid)
+        }
+        ChestKind::Large => {
+            let lid = Part::pivot()
+                .at(0.0, 0.8, 0.5)
+                .tag(AnimTag::Lid)
+                .with(Part::cube(1.5, 0.32, 1.0).at(0.0, 0.16, -0.5).color(GOLD))
+                .with(Part::cube(1.54, 0.08, 1.04).at(0.0, 0.3, -0.5).color(WOOD_DARK))
+                .with(Part::ico(0.24, 0.24, 0.12).at(0.0, 0.12, -1.02).color(GLOW_ORANGE).glow(4.0));
+            Part::pivot()
+                .with(Part::cube(1.5, 0.8, 1.0).at(0.0, 0.4, 0.0).color(GOLD))
+                .with(Part::cube(1.54, 0.1, 1.04).at(0.0, 0.1, 0.0).color(WOOD_DARK))
+                .with(Part::cube(0.12, 0.82, 1.04).at(0.5, 0.4, 0.0).color(WOOD_DARK))
+                .with(Part::cube(0.12, 0.82, 1.04).at(-0.5, 0.4, 0.0).color(WOOD_DARK))
+                .with(Part::cube(0.22, 0.28, 0.06).at(0.0, 0.62, -0.52).color(WOOD_DARK))
+                .with(Part::sphere(0.7).at(0.0, 0.65, 0.0).color(GLOW_ORANGE).glow(3.5))
+                .with(lid)
+        }
+        ChestKind::Legendary => {
+            let lid = Part::pivot()
+                .at(0.0, 0.7, 0.45)
+                .tag(AnimTag::Lid)
+                .with(Part::cube(1.3, 0.28, 0.9).at(0.0, 0.14, -0.45).color(PLUM_DARK))
+                .with(Part::cube(1.34, 0.06, 0.94).at(0.0, 0.26, -0.45).color(GLOW_MAGENTA).glow(3.0))
+                .with(Part::ico(0.3, 0.3, 0.3).at(0.0, 0.45, -0.45).color(GLOW_MAGENTA).glow(5.0).tag(AnimTag::Bob));
+            Part::pivot()
+                .with(Part::cube(1.3, 0.7, 0.9).at(0.0, 0.35, 0.0).color(PLUM_DARK))
+                .with(Part::cube(1.34, 0.06, 0.94).at(0.0, 0.08, 0.0).color(GLOW_MAGENTA).glow(3.0))
+                .with(Part::cube(1.34, 0.06, 0.94).at(0.0, 0.6, 0.0).color(GOLD))
+                .with(Part::cone(0.25, 0.5).at(0.6, 0.95, 0.4).color(GOLD))
+                .with(Part::cone(0.25, 0.5).at(-0.6, 0.95, 0.4).color(GOLD))
+                .with(Part::sphere(0.7).at(0.0, 0.55, 0.0).color(GLOW_MAGENTA).glow(4.0))
                 .with(lid)
         }
         ChestKind::Weapon => {

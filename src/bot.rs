@@ -51,7 +51,7 @@ pub struct BotView<'a> {
     pub me: &'a PlayerSim,
     pub downed: bool,
     pub gold: u32,
-    pub difficulty: f32,
+    pub wave: u32,
     /// (center position) of monsters.
     pub mobs: &'a [Vec3],
     /// Unopened chests.
@@ -112,7 +112,7 @@ pub fn think(brain: &mut BotBrain, view: &BotView) -> BotOutput {
         &mut view
             .chests
             .iter()
-            .filter(|(p, k)| p.distance(me) < 50.0 && reachable(p) && view.gold >= economy::chest_price(*k, view.difficulty))
+            .filter(|(p, k)| p.distance(me) < 50.0 && reachable(p) && view.gold >= economy::chest_price(*k, view.wave))
             .map(|(p, _)| *p),
     );
     // 3. Fight.
@@ -259,7 +259,7 @@ fn server_bots(
             me: &state.sim,
             downed: health.downed,
             gold: wallet.gold,
-            difficulty: info.difficulty,
+            wave: info.wave,
             mobs: &world.mobs,
             chests: &world.chests,
             downed_allies: &world.downed,
@@ -298,7 +298,7 @@ fn bot_client_input(
         me: &pred.sim,
         downed: health.downed,
         gold: wallet.gold,
-        difficulty: info.difficulty,
+        wave: info.wave,
         mobs: &world.mobs,
         chests: &world.chests,
         downed_allies: &world.downed,
@@ -337,9 +337,10 @@ fn log_server_summary(
         })
         .collect();
     info!(
-        "[run] t={:.0}s lvl {} diff {:.2} mobs {} chests opened {} spawned {} | {}",
+        "[run] t={:.0}s wave {} ({:?}) diff {:.2} mobs {} chests opened {} spawned {} | {}",
         info.elapsed,
-        info.level,
+        info.wave,
+        info.wave_phase,
         info.difficulty,
         mobs.iter().count(),
         chests.opened.len(),
@@ -406,13 +407,13 @@ mod tests {
     use super::*;
 
     fn view<'a>(me: &'a PlayerSim, mobs: &'a [Vec3], chests: &'a [(Vec3, ChestKind)]) -> BotView<'a> {
-        BotView { me, downed: false, gold: 1000, difficulty: 1.0, mobs, chests, downed_allies: &[] }
+        BotView { me, downed: false, gold: 1000, wave: 1, mobs, chests, downed_allies: &[] }
     }
 
     #[test]
     fn ignores_chests_too_high() {
         let me = PlayerSim::spawn_at(Vec3::ZERO);
-        let chests = [(Vec3::new(10.0, 8.0, 0.0), ChestKind::Item)];
+        let chests = [(Vec3::new(10.0, 8.0, 0.0), ChestKind::Small)];
         let mut brain = BotBrain::default();
         think(&mut brain, &view(&me, &[], &chests));
         assert!(brain.chest_goal.is_none());
@@ -421,7 +422,7 @@ mod tests {
     #[test]
     fn gives_up_unreachable_chest() {
         let me = PlayerSim::spawn_at(Vec3::ZERO);
-        let chests = [(Vec3::new(10.0, 1.0, 0.0), ChestKind::Item)];
+        let chests = [(Vec3::new(10.0, 1.0, 0.0), ChestKind::Small)];
         let mut brain = BotBrain::default();
         for _ in 0..=CHEST_GIVE_UP_TICKS + 1 {
             think(&mut brain, &view(&me, &[], &chests));
@@ -433,7 +434,7 @@ mod tests {
     #[test]
     fn fights_before_shopping_when_threatened() {
         let me = PlayerSim::spawn_at(Vec3::ZERO);
-        let chests = [(Vec3::new(10.0, 0.0, 0.0), ChestKind::Item)];
+        let chests = [(Vec3::new(10.0, 0.0, 0.0), ChestKind::Small)];
         let mobs = [Vec3::new(0.0, 0.5, -5.0)];
         let mut brain = BotBrain::default();
         think(&mut brain, &view(&me, &mobs, &chests));

@@ -1,4 +1,4 @@
-//! Difficulty, money and prices. Pure functions = easy to test and tune.
+//! Waves, difficulty, money and prices. Pure functions = easy to test and tune.
 //!
 //! ## Money design (coop)
 //! Each player has their **own wallet**, but **every kill pays every player**
@@ -8,46 +8,93 @@
 //! - unlike a single shared wallet, nobody can "spend the team's money" on a
 //!   chest the others wanted: each player decides for themselves;
 //! - it scales naturally with the number of players (each one gets items).
+//!
+//! ## Waves (V2)
+//! The run is a sequence of waves. A wave has a *budget* of monsters; once
+//! everything is spawned, the last monster must die to end the wave. Then a
+//! short break lets players shop, and the next, harder wave begins. Every
+//! 5th wave is a boss wave. Chest prices go up with each wave.
 
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ChestKind {
-    Item,
+    /// Wooden chest: mostly common upgrades.
+    Small,
+    /// Big golden chest: better rarity odds.
+    Large,
+    /// Rare glowing chest (also dropped by bosses): epic/legendary only.
+    Legendary,
+    /// Steel crate: drops a weapon on the ground.
     Weapon,
 }
 
-pub const BASE_ITEM_CHEST_PRICE: f32 = 25.0;
-pub const BASE_WEAPON_CHEST_PRICE: f32 = 70.0;
+impl ChestKind {
+    pub fn base_price(self) -> f32 {
+        match self {
+            ChestKind::Small => 25.0,
+            ChestKind::Large => 60.0,
+            ChestKind::Legendary => 160.0,
+            ChestKind::Weapon => 55.0,
+        }
+    }
 
-/// Difficulty coefficient: 1.0 at the start, grows linearly with time,
-/// faster with more players. (Inspired by Risk of Rain 2.)
-pub fn difficulty(elapsed_secs: f32, players: u32) -> f32 {
-    let minutes = elapsed_secs / 60.0;
-    let player_factor = 1.0 + 0.15 * (players.max(1) - 1) as f32;
-    1.0 + minutes * 0.16 * player_factor
+    pub fn name(self) -> &'static str {
+        match self {
+            ChestKind::Small => "petit coffre",
+            ChestKind::Large => "grand coffre",
+            ChestKind::Legendary => "coffre légendaire",
+            ChestKind::Weapon => "caisse d'arme",
+        }
+    }
 }
 
-/// Integer "level" displayed in the HUD and used for monster stats.
-pub fn monster_level(difficulty: f32) -> u32 {
-    1 + ((difficulty - 1.0) * 3.0).floor().max(0.0) as u32
+/// Break between two waves, in seconds (time to shop and regroup).
+pub const WAVE_BREAK: f32 = 12.0;
+/// A monster farther than this from every player is brought back near them.
+pub const STRAGGLER_DISTANCE: f32 = 70.0;
+/// Once a wave is fully spawned, monsters still alive after this many
+/// seconds are brought back near the players (no endless hunt for the last one).
+pub const STRAGGLER_TIME: f32 = 30.0;
+
+/// Difficulty coefficient of a wave: 1.0 for wave 1, faster with more players.
+pub fn wave_difficulty(wave: u32, players: u32) -> f32 {
+    let player_factor = 1.0 + 0.15 * (players.max(1) - 1) as f32;
+    1.0 + (wave.max(1) - 1) as f32 * 0.2 * player_factor
+}
+
+/// Monster level = wave number (displayed in the HUD, drives monster stats).
+pub fn monster_level(wave: u32) -> u32 {
+    wave.max(1)
 }
 
 pub fn monster_hp_mult(level: u32) -> f32 {
-    1.0 + 0.32 * (level - 1) as f32
+    1.0 + 0.28 * (level.max(1) - 1) as f32
 }
 
 pub fn monster_damage_mult(level: u32) -> f32 {
-    1.0 + 0.18 * (level - 1) as f32
+    1.0 + 0.15 * (level.max(1) - 1) as f32
 }
 
-/// Chest prices grow a bit faster than income: spending early is rewarded.
-pub fn chest_price(kind: ChestKind, difficulty: f32) -> u32 {
-    let base = match kind {
-        ChestKind::Item => BASE_ITEM_CHEST_PRICE,
-        ChestKind::Weapon => BASE_WEAPON_CHEST_PRICE,
-    };
-    (base * difficulty.powf(1.25)).round() as u32
+/// Total spawn budget of a wave (sum of monster costs).
+pub fn wave_budget(wave: u32, players: u32) -> f32 {
+    let w = wave.max(1) as f32;
+    (6.0 + 4.0 * w + 0.35 * w * w) * (1.0 + 0.55 * (players.max(1) - 1) as f32)
+}
+
+pub fn is_boss_wave(wave: u32) -> bool {
+    wave > 0 && wave.is_multiple_of(5)
+}
+
+/// Price multiplier of chests for a wave: +25% per wave, slightly accelerating.
+pub fn wave_price_mult(wave: u32) -> f32 {
+    let w = (wave.max(1) - 1) as f32;
+    1.0 + 0.25 * w + 0.015 * w * w
+}
+
+/// Chest prices go up with every wave.
+pub fn chest_price(kind: ChestKind, wave: u32) -> u32 {
+    (kind.base_price() * wave_price_mult(wave)).round() as u32
 }
 
 /// Gold paid to *each* player for a kill.
@@ -55,58 +102,64 @@ pub fn kill_reward(base_gold: f32, difficulty: f32, gold_mult: f32) -> u32 {
     (base_gold * difficulty * gold_mult).round().max(1.0) as u32
 }
 
-/// Spawn budget gained per second by the monster director.
-pub fn director_credit_rate(difficulty: f32, players: u32) -> f32 {
-    (0.35 + 0.4 * players.max(1) as f32) * difficulty.powf(0.95)
-}
-
 /// Max monsters alive at once (keeps performance and readability in check).
-pub fn max_alive_monsters(players: u32, difficulty: f32) -> usize {
-    let n = 6.0 + 4.0 * players.max(1) as f32 + 5.0 * (difficulty - 1.0);
-    (n as usize).min(70)
+pub fn max_alive_monsters(players: u32, wave: u32) -> usize {
+    let n = 7.0 + 4.0 * players.max(1) as f32 + 1.5 * wave as f32;
+    (n as usize).min(60)
 }
 
-/// Seconds between boss spawns.
-pub const BOSS_INTERVAL: f32 = 300.0;
+/// Seconds between two spawn packs during a wave.
+pub fn spawn_interval(wave: u32) -> f32 {
+    (3.0 - 0.12 * wave as f32).max(0.9)
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn difficulty_starts_at_one_and_grows() {
-        assert_eq!(difficulty(0.0, 1), 1.0);
-        assert!(difficulty(600.0, 1) > difficulty(300.0, 1));
-        // More players => harder.
-        assert!(difficulty(300.0, 4) > difficulty(300.0, 1));
+    fn difficulty_grows_with_waves_and_players() {
+        assert_eq!(wave_difficulty(1, 1), 1.0);
+        assert!(wave_difficulty(5, 1) > wave_difficulty(2, 1));
+        assert!(wave_difficulty(5, 4) > wave_difficulty(5, 1));
     }
 
     #[test]
-    fn prices_increase_over_time() {
+    fn prices_increase_every_wave() {
         let mut last = 0;
-        for minute in 0..30 {
-            let p = chest_price(ChestKind::Item, difficulty(minute as f32 * 60.0, 2));
-            assert!(p >= last);
+        for wave in 1..30 {
+            let p = chest_price(ChestKind::Small, wave);
+            assert!(p > last, "wave {wave}: {p} <= {last}");
             last = p;
         }
-        assert_eq!(chest_price(ChestKind::Item, 1.0), 25);
-        assert!(chest_price(ChestKind::Weapon, 1.0) > chest_price(ChestKind::Item, 1.0));
+        assert_eq!(chest_price(ChestKind::Small, 1), 25);
+        assert!(chest_price(ChestKind::Large, 1) > chest_price(ChestKind::Small, 1));
+        assert!(chest_price(ChestKind::Legendary, 1) > chest_price(ChestKind::Large, 1));
     }
 
     #[test]
-    fn prices_outpace_income() {
-        // Kills needed for a chest should slowly increase with difficulty.
-        let kills = |d: f32| chest_price(ChestKind::Item, d) as f32 / kill_reward(5.0, d, 1.0) as f32;
-        assert!(kills(4.0) > kills(1.0));
-        // ...but stay reasonable (a few dozen kills max).
-        assert!(kills(6.0) < 20.0);
+    fn a_wave_pays_for_some_chests() {
+        // Gold earned in a wave (approx: budget * ~3 gold per cost unit)
+        // should buy a couple of small chests, early and late.
+        for wave in [1, 5, 10, 20] {
+            let gold = wave_budget(wave, 1) * 3.0 * wave_difficulty(wave, 1);
+            let chests = gold / chest_price(ChestKind::Small, wave) as f32;
+            assert!((1.0..12.0).contains(&chests), "wave {wave}: {chests} chests");
+        }
     }
 
     #[test]
-    fn monster_level_progression() {
-        assert_eq!(monster_level(1.0), 1);
-        assert!(monster_level(2.0) > 1);
-        assert!(monster_hp_mult(5) > monster_hp_mult(1));
+    fn boss_waves() {
+        assert!(!is_boss_wave(1));
+        assert!(is_boss_wave(5));
+        assert!(is_boss_wave(10));
+        assert!(!is_boss_wave(0));
+    }
+
+    #[test]
+    fn budgets_grow() {
+        assert!(wave_budget(2, 1) > wave_budget(1, 1));
+        assert!(wave_budget(1, 4) > wave_budget(1, 1));
     }
 
     #[test]
@@ -116,7 +169,8 @@ mod tests {
 
     #[test]
     fn monster_cap_is_bounded() {
-        assert!(max_alive_monsters(4, 50.0) <= 70);
-        assert!(max_alive_monsters(1, 1.0) >= 8);
+        assert!(max_alive_monsters(4, 50) <= 60);
+        assert!(max_alive_monsters(1, 1) >= 8);
+        assert!(spawn_interval(100) >= 0.9);
     }
 }

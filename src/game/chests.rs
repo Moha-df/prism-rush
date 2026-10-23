@@ -92,7 +92,7 @@ fn stream_chests(
 /// Picks the reward of a chest. Weapon chests prefer weapons you don't own.
 pub fn roll_reward(kind: ChestKind, owned: &[WeaponKind], rng: &mut Rng) -> Reward {
     match kind {
-        ChestKind::Item => Reward::Item(ItemKind::roll(rng)),
+        ChestKind::Small | ChestKind::Large | ChestKind::Legendary => Reward::Item(ItemKind::roll(rng)),
         ChestKind::Weapon => {
             let candidates: Vec<WeaponKind> = WeaponKind::ALL
                 .into_iter()
@@ -138,7 +138,7 @@ fn open_chests(
             .min_by(|a, b| a.1.pos.distance(pos).total_cmp(&b.1.pos.distance(pos)));
         let Some((entity, chest, mut open)) = nearest else { continue };
 
-        let price = economy::chest_price(chest.kind, info.difficulty);
+        let price = economy::chest_price(chest.kind, info.wave);
         if wallet.gold < price {
             continue;
         }
@@ -202,6 +202,6 @@ mod tests {
     #[test]
     fn item_chest_gives_items() {
         let mut rng = Rng::new(3);
-        assert!(matches!(roll_reward(ChestKind::Item, &[], &mut rng), Reward::Item(_)));
+        assert!(matches!(roll_reward(ChestKind::Small, &[], &mut rng), Reward::Item(_)));
     }
 }

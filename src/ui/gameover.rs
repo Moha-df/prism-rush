@@ -66,7 +66,7 @@ fn fill_when_ready(
     let Some(run) = &last.0 else { return };
     let secs = run.duration as u32;
     commands.spawn((
-        label(format!("Survécu {:02}:{:02} — niveau {}", secs / 60, secs % 60, run.level), 26.0, TEXT),
+        label(format!("Survécu {:02}:{:02} — vague {} atteinte", secs / 60, secs % 60, run.level), 26.0, TEXT),
         ChildOf(table),
     ));
     commands.spawn((
