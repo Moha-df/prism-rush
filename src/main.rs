@@ -75,8 +75,16 @@ enum Command {
     },
 }
 
-/// If the game ever crashes, write the reason to `crash.log` (the game is
-/// usually started without a console, so the error would be invisible).
+/// Folder for log files, next to the executable (found even when launched
+/// from another folder or by double-click).
+fn log_dir() -> std::path::PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|p| p.join("logs")))
+        .unwrap_or_else(|| std::path::PathBuf::from("logs"))
+}
+
+/// If the game ever crashes, write the reason to `logs/crash.log`.
 fn install_crash_log() {
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
@@ -86,9 +94,43 @@ fn install_crash_log() {
 
 {backtrace}
 ");
-        let _ = std::fs::write("crash.log", text);
+        let dir = log_dir();
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::fs::write(dir.join("crash.log"), text);
         default_hook(info);
     }));
+}
+
+/// Extra log output: everything that is printed in the console is also
+/// written to `logs/prism_rush.log` (the previous run is kept as
+/// `prism_rush.prev.log`). Plain function (no closure) because `LogPlugin`
+/// expects a function pointer.
+fn file_log_layer(_app: &mut App) -> Option<bevy::log::BoxedLayer> {
+    use bevy::log::tracing_subscriber::{self, Layer};
+    let dir = log_dir();
+    std::fs::create_dir_all(&dir).ok()?;
+    let path = dir.join("prism_rush.log");
+    let _ = std::fs::rename(&path, dir.join("prism_rush.prev.log"));
+    let file = std::fs::File::create(&path).ok()?;
+    let layer = tracing_subscriber::fmt::layer()
+        .with_ansi(false)
+        .with_writer(std::sync::Mutex::new(file))
+        .with_filter(tracing_subscriber::filter::LevelFilter::INFO);
+    Some(Box::new(layer))
+}
+
+/// Logs why the app is closing (normal exit vs. error), to tell apart a
+/// requested exit from a hard crash in the log file.
+fn log_app_exit(mut exits: MessageReader<AppExit>, closed: Option<MessageReader<bevy::window::WindowCloseRequested>>) {
+    // `Option`: the window message doesn't exist in headless mode.
+    if let Some(mut closed) = closed {
+        for e in closed.read() {
+            info!("window close requested ({:?})", e.window);
+        }
+    }
+    for e in exits.read() {
+        warn!("application exit requested: {e:?}");
+    }
 }
 
 fn main() {
@@ -144,11 +186,11 @@ fn main() {
         app.add_plugins((
             MinimalPlugins.set(ScheduleRunnerPlugin::run_loop(Duration::from_secs_f64(1.0 / 120.0))),
             StatesPlugin,
-            LogPlugin::default(),
+            LogPlugin { custom_layer: file_log_layer, ..default() },
             TransformPlugin,
         ));
     } else {
-        app.add_plugins(DefaultPlugins.set(WindowPlugin {
+        app.add_plugins(DefaultPlugins.set(LogPlugin { custom_layer: file_log_layer, ..default() }).set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Prism Rush".into(),
                 resolution: WindowResolution::new(1600, 900),
@@ -177,5 +219,7 @@ fn main() {
     if !headless {
         app.add_plugins((render::RenderPlugin, ui::UiPlugin));
     }
+    app.add_systems(Last, log_app_exit);
+    info!("Prism Rush {} — logs dans {}", env!("CARGO_PKG_VERSION"), log_dir().display());
     app.run();
 }

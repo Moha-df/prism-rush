@@ -4,3 +4,4 @@ settings.txt
 /dist
 /shots*
 crash.log
+logs/
