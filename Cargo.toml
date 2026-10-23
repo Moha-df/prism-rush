@@ -1,0 +1,27 @@
+[package]
+name = "prism_rush"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bevy = { version = "0.20", features = ["serialize"] }
+bevy_quinnet = { version = "0.22", default-features = false, features = ["client", "server"] }
+bevy_replicon = "0.45"
+bevy_replicon_quinnet = "0.21"
+clap = { version = "4.6.7", features = ["derive"] }
+serde = { version = "1.0.229", features = ["derive"] }
+
+# Compile our own code with light optimizations (fast iteration),
+# but dependencies (Bevy...) fully optimized: otherwise the game is very slow in debug.
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+codegen-units = 4
+
+[dev-dependencies]
+postcard = { version = "1.1.3", features = ["alloc"] }
+
