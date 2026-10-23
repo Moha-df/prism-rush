@@ -40,13 +40,39 @@ const BUTTON: Color = Color::srgb(0.24, 0.18, 0.32);
 const BUTTON_HOVER: Color = Color::srgb(0.38, 0.27, 0.48);
 const BUTTON_PRESS: Color = Color::srgb(0.95, 0.55, 0.3);
 
-/// System sans-serif font (Segoe UI on Windows): full French accents support.
+/// The two UI fonts, loaded once at startup (see `load_fonts`).
+static FONTS: std::sync::OnceLock<(Handle<Font>, Handle<Font>)> = std::sync::OnceLock::new();
+
+/// Loads Segoe UI (regular + bold) straight from Windows' font folder: full
+/// French accents support. We used `FontSource::sans_serif()` (generic system
+/// font) before, but with Bevy 0.20 it allocated a new 512x512 glyph atlas
+/// texture *every frame* until the graphics card ran out of memory and the
+/// game closed. A fixed font asset is resolved once and cached properly.
+pub fn load_fonts(mut fonts: ResMut<Assets<Font>>) {
+    let mut load = |file: &str| -> Handle<Font> {
+        let path = std::path::Path::new(r"C:\Windows\Fonts").join(file);
+        match std::fs::read(&path) {
+            Ok(bytes) => fonts.add(Font::from_bytes(bytes)),
+            Err(e) => {
+                warn!("font {path:?} not found ({e}), using Bevy's default font");
+                Handle::default()
+            }
+        }
+    };
+    let _ = FONTS.set((load("segoeui.ttf"), load("segoeuib.ttf")));
+}
+
+fn font_with(bold: bool, size: f32) -> TextFont {
+    let handle = FONTS.get().map(|(r, b)| if bold { b.clone() } else { r.clone() }).unwrap_or_default();
+    TextFont::from(FontSource::from(handle)).with_font_size(FontSize::Px(size))
+}
+
 pub fn font(size: f32) -> TextFont {
-    TextFont::from(FontSource::sans_serif()).with_font_size(FontSize::Px(size))
+    font_with(false, size)
 }
 
 pub fn bold(size: f32) -> TextFont {
-    TextFont { weight: FontWeight(800), ..font(size) }
+    font_with(true, size)
 }
 
 pub fn label(text: impl Into<String>, size: f32, color: Color) -> impl Bundle {
@@ -215,7 +241,10 @@ fn render_fields(
         for child in children.iter() {
             if let Ok(mut text) = labels.get_mut(child) {
                 let cursor = if field.focused && blink { "|" } else { "" };
-                text.0 = format!("{}{}", field.value, cursor);
+                let value = format!("{}{}", field.value, cursor);
+                if text.0 != value {
+                    text.0 = value;
+                }
             }
         }
     }
@@ -226,6 +255,7 @@ pub struct WidgetsPlugin;
 impl Plugin for WidgetsPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<UiAction>()
+            .add_systems(PreStartup, load_fonts)
             .add_systems(Update, (button_colors, focus_default, type_in_fields, render_fields));
     }
 }

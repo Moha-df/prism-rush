@@ -49,6 +49,12 @@ pub fn diag_mobs(
     all: Query<Entity>,
     time: Res<Time<Real>>,
     mut last: Local<f32>,
+    meshes: Res<Assets<Mesh>>,
+    materials: Res<Assets<StandardMaterial>>,
+    images: Res<Assets<Image>>,
+    texts: Query<(), With<Text>>,
+    nodes: Query<(), With<Node>>,
+    lights: Query<(), With<PointLight>>,
 ) {
     if time.elapsed_secs() - *last < 3.0 {
         return;
@@ -56,5 +62,17 @@ pub fn diag_mobs(
     *last = time.elapsed_secs();
     let max = mobs.iter().map(|(_, s, t)| s.pos.distance(t.translation)).fold(0.0f32, f32::max);
     let orphans = parts.iter().filter(|p| all.get(p.root).is_err()).count();
-    info!("[diag] mobs {} max visual offset {:.2} m, orphan anim parts {}", mobs.iter().count(), max, orphans);
+    info!(
+        "[diag] entities {} meshes {} materials {} images {} texts {} nodes {} lights {} | mobs {} offset {:.2} orphans {}",
+        all.iter().count(),
+        meshes.len(),
+        materials.len(),
+        images.len(),
+        texts.iter().count(),
+        nodes.iter().count(),
+        lights.iter().count(),
+        mobs.iter().count(),
+        max,
+        orphans
+    );
 }

@@ -290,6 +290,16 @@ fn spawn_hud(mut commands: Commands) {
     ));
 }
 
+/// Only touches the text if it really changed: rewriting a `Text` every frame
+/// forces a new text layout (and, with system fonts, leaked a GPU texture
+/// per frame until the graphics card ran out of memory).
+fn set_text(text: &mut Text, value: impl Into<String>) {
+    let value = value.into();
+    if text.0 != value {
+        text.0 = value;
+    }
+}
+
 type LocalQuery<'a> = (&'a Player, &'a Health, &'a Wallet, &'a Items);
 
 fn local_player<'a>(local: &LocalPlayer, q: &'a Query<LocalQuery>) -> Option<(&'a Player, &'a Health, &'a Wallet, &'a Items)> {
@@ -308,7 +318,7 @@ fn update_vitals(
 ) {
     if let Some((_, health, wallet, _)) = local_player(&local, &players) {
         if let Ok(mut t) = hp_text.single_mut() {
-            t.0 = format!("PV {:.0} / {:.0}", health.hp.max(0.0), health.max);
+            set_text(&mut t, format!("PV {:.0} / {:.0}", health.hp.max(0.0), health.max));
         }
         if let Ok((mut node, mut color)) = hp_fill.single_mut() {
             let frac = (health.hp / health.max).clamp(0.0, 1.0);
@@ -316,19 +326,19 @@ fn update_vitals(
             color.0 = if frac < 0.3 { Color::srgb(0.95, 0.3, 0.25) } else { Color::srgb(0.35, 0.85, 0.45) };
         }
         if let Ok(mut t) = gold.single_mut() {
-            t.0 = format!("{} or", wallet.gold);
+            set_text(&mut t, format!("{} or", wallet.gold));
         }
     }
     if let (Ok(m), Ok(mut t)) = (info.single(), run.single_mut()) {
         let secs = m.elapsed as u32;
-        t.0 = format!(
+        set_text(&mut t, format!(
             "{:02}:{:02}   Niveau {}   ·   Coffre {} or   ·   Arme {} or",
             secs / 60,
             secs % 60,
             m.level,
             economy::chest_price(economy::ChestKind::Item, m.difficulty),
             economy::chest_price(economy::ChestKind::Weapon, m.difficulty)
-        );
+        ));
     }
 }
 
@@ -350,23 +360,23 @@ fn update_weapon(
     let kind = a.current_kind();
     let stats = local_player(&local, &players).map(|(_, _, _, i)| PlayerStats::from_inventory(&i.0)).unwrap_or_else(|| PlayerStats::from_inventory(&Default::default()));
     if let Ok(mut t) = weapon.single_mut() {
-        t.0 = kind.def().name.to_string();
+        set_text(&mut t, kind.def().name.to_string());
     }
     if let Ok(mut t) = ammo.single_mut() {
-        t.0 = if a.is_reloading() {
+        set_text(&mut t, if a.is_reloading() {
             "Rechargement".into()
         } else {
             format!("{} / {}", a.weapons[a.current].ammo, magazine_size(kind, &stats))
-        };
+        });
     }
     if let Ok(mut t) = slots.single_mut() {
-        t.0 = a
+        set_text(&mut t, a
             .weapons
             .iter()
             .enumerate()
             .map(|(i, w)| if i == a.current { format!("[{} {}]", i + 1, w.kind.def().name) } else { format!("{}", i + 1) })
             .collect::<Vec<_>>()
-            .join("  ");
+            .join("  "));
     }
     if let Ok(mut node) = reload.single_mut() {
         let frac = if a.is_reloading() { 1.0 - a.reload_left / kind.def().reload_time } else { 0.0 };
@@ -375,7 +385,7 @@ fn update_weapon(
     if let Ok(mut t) = dash.single_mut() {
         let full = pred.sim.mv.dash_energy.floor() as usize;
         let max = stats.movement.dash_charges as usize;
-        t.0 = format!("Dash {}{}   Sauts {}", "●".repeat(full), "○".repeat(max.saturating_sub(full)), stats.movement.air_jumps + 1);
+        set_text(&mut t, format!("Dash {}{}   Sauts {}", "●".repeat(full), "○".repeat(max.saturating_sub(full)), stats.movement.air_jumps + 1));
     }
 }
 
@@ -493,7 +503,7 @@ fn update_team_and_boss(
     if let Ok(mut t) = team.single_mut() {
         let mut sorted: Vec<_> = players.iter().filter(|(p, _)| Some(p.slot) != local.slot).collect();
         sorted.sort_by_key(|(p, _)| p.slot);
-        t.0 = sorted
+        set_text(&mut t, sorted
             .iter()
             .map(|(p, h)| match h {
                 Some(h) if h.downed => format!("{} — À TERRE", p.name),
@@ -501,7 +511,7 @@ fn update_team_and_boss(
                 None => p.name.clone(),
             })
             .collect::<Vec<_>>()
-            .join("\n");
+            .join("\n"));
     }
     let boss = bosses.iter().find(|(m, _)| m.kind == MobKind::Colossus);
     if let Ok(mut vis) = boss_bar.single_mut() {

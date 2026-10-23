@@ -166,7 +166,7 @@ fn damage_number(commands: &mut Commands, pos: Vec3, amount: u16, crit: bool, rn
             max_life: 0.8,
         },
         Text::new(if crit { format!("{amount}!") } else { amount.to_string() }),
-        TextFont { font_size: FontSize::Px(size), ..default() },
+        crate::ui::widgets::bold(size),
         TextColor(color),
         TextShadow::default(),
         Node { position_type: PositionType::Absolute, ..default() },
