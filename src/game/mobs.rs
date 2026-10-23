@@ -28,7 +28,7 @@ pub struct Director {
 
 impl Default for Director {
     fn default() -> Self {
-        Self { credits: 6.0, spawn_timer: 3.0, boss_timer: economy::BOSS_INTERVAL, rng: Rng::new(0xD1EC), spawned: 0 }
+        Self { credits: 3.0, spawn_timer: 4.0, boss_timer: economy::BOSS_INTERVAL, rng: Rng::new(0xD1EC), spawned: 0 }
     }
 }
 
@@ -195,7 +195,7 @@ fn mob_ai(
 
         // Too far from everyone: despawn (the director will spawn closer ones).
         if !all_players.iter().any(|p| p.distance(state.pos) < DESPAWN_DISTANCE) && !mob.kind.is_boss() {
-            commands.entity(entity).despawn();
+            commands.entity(entity).try_despawn();
             continue;
         }
 
@@ -279,7 +279,7 @@ fn mob_ai(
                                 hurts_mobs: false,
                                 by: None,
                             });
-                            commands.entity(entity).despawn();
+                            commands.entity(entity).try_despawn();
                             continue;
                         }
                         MobKind::Spitter => {

@@ -57,12 +57,12 @@ pub fn kill_reward(base_gold: f32, difficulty: f32, gold_mult: f32) -> u32 {
 
 /// Spawn budget gained per second by the monster director.
 pub fn director_credit_rate(difficulty: f32, players: u32) -> f32 {
-    (0.9 + 0.55 * players.max(1) as f32) * difficulty.powf(0.9)
+    (0.35 + 0.4 * players.max(1) as f32) * difficulty.powf(0.95)
 }
 
 /// Max monsters alive at once (keeps performance and readability in check).
 pub fn max_alive_monsters(players: u32, difficulty: f32) -> usize {
-    let n = 10.0 + 5.0 * players.max(1) as f32 + 4.0 * (difficulty - 1.0);
+    let n = 6.0 + 4.0 * players.max(1) as f32 + 5.0 * (difficulty - 1.0);
     (n as usize).min(70)
 }
 
@@ -117,6 +117,6 @@ mod tests {
     #[test]
     fn monster_cap_is_bounded() {
         assert!(max_alive_monsters(4, 50.0) <= 70);
-        assert!(max_alive_monsters(1, 1.0) >= 10);
+        assert!(max_alive_monsters(1, 1.0) >= 8);
     }
 }

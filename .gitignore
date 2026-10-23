@@ -1,3 +1,6 @@
 /target
 settings.txt
 *.log
+/dist
+/shots*
+crash.log

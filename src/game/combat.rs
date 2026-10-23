@@ -116,14 +116,23 @@ pub fn ray_capsule(origin: Vec3, dir: Vec3, a: Vec3, b: Vec3, r: f32) -> Option<
     let w = origin - a;
     let (uu, uv, vv, uw, vw) = (u.dot(u), u.dot(v), v.dot(v), u.dot(w), v.dot(w));
     let denom = uu * vv - uv * uv;
-    // Parameter on the segment of the closest approach, clamped to the segment...
-    let s = if denom.abs() < 1e-6 { vw / vv } else { (uu * vw - uv * uw) / denom }.clamp(0.0, 1.0);
+    // Parameter on the segment of the closest approach, clamped to the segment.
+    // Degenerate cases must be handled explicitly: a zero-length segment (the
+    // capsule is a sphere, e.g. small monsters) would give 0/0 = NaN, and NaN
+    // makes every comparison below false => a "hit" on every such monster.
+    let s = if vv < 1e-8 {
+        0.0
+    } else if denom.abs() < 1e-6 {
+        (vw / vv).clamp(0.0, 1.0)
+    } else {
+        ((uu * vw - uv * uw) / denom).clamp(0.0, 1.0)
+    };
     // ...then the matching (non-negative) distance along the ray.
     let t = ((a + v * s - origin).dot(u) / uu).max(0.0);
     let closest_ray = origin + u * t;
     let closest_seg = a + v * s;
     let d2 = closest_ray.distance_squared(closest_seg);
-    if d2 > r * r {
+    if !d2.is_finite() || d2 > r * r {
         return None;
     }
     // Step back to the entry point of the sphere around the closest point.
@@ -283,7 +292,7 @@ fn update_projectiles(
         if !hit {
             continue;
         }
-        commands.entity(entity).despawn();
+        commands.entity(entity).try_despawn();
         if data.splash > 0.0 {
             explode.write(Explode {
                 pos,
@@ -384,7 +393,7 @@ fn apply_mob_damage(
         });
 
         if killed {
-            commands.entity(hit.target).despawn();
+            commands.entity(hit.target).try_despawn();
             // Every player gets paid (see economy.rs for why).
             for (_, _, mut wallet, items, mut score) in &mut players {
                 let s = PlayerStats::from_inventory(&items.0);
@@ -444,6 +453,26 @@ mod tests {
     fn ray_misses_capsule_on_the_side_or_behind() {
         assert!(ray_capsule(Vec3::ZERO, Vec3::NEG_Z, Vec3::new(2.0, -1.0, -10.0), Vec3::new(2.0, 1.0, -10.0), 0.5).is_none());
         assert!(ray_capsule(Vec3::ZERO, Vec3::NEG_Z, Vec3::new(0.0, -1.0, 10.0), Vec3::new(0.0, 1.0, 10.0), 0.5).is_none());
+    }
+
+    #[test]
+    fn ray_vs_sphere_capsule() {
+        // Regression: a capsule whose two ends are the same point (a sphere)
+        // used to produce NaN and count as a hit from anywhere.
+        let p = Vec3::new(30.0, 0.0, -5.0);
+        assert!(ray_capsule(Vec3::ZERO, Vec3::NEG_Z, p, p, 0.4).is_none());
+        let t = ray_capsule(Vec3::ZERO, Vec3::NEG_Z, Vec3::new(0.0, 0.0, -5.0), Vec3::new(0.0, 0.0, -5.0), 0.4);
+        assert!((t.expect("should hit") - 4.6).abs() < 0.01);
+    }
+
+    #[test]
+    fn every_mob_capsule_is_hittable_only_in_front() {
+        for kind in MobKind::SPAWNABLE.into_iter().chain([MobKind::Colossus]) {
+            let (a, b, r) = mob_capsule(kind, Vec3::new(0.0, 0.0, -10.0));
+            assert!(ray_capsule(Vec3::new(0.0, 0.5, 0.0), Vec3::NEG_Z, a, b, r).is_some(), "{kind:?}");
+            let (a, b, r) = mob_capsule(kind, Vec3::new(40.0, 0.0, -10.0));
+            assert!(ray_capsule(Vec3::new(0.0, 0.5, 0.0), Vec3::NEG_Z, a, b, r).is_none(), "{kind:?}");
+        }
     }
 
     #[test]

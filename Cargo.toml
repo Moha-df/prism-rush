@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-bevy = { version = "0.20", features = ["serialize"] }
+bevy = { version = "0.20", features = ["serialize", "system_clipboard", "system_font_discovery"] }
 bevy_quinnet = { version = "0.22", default-features = false, features = ["client", "server"] }
 bevy_replicon = "0.45"
 bevy_replicon_quinnet = "0.21"

@@ -25,11 +25,24 @@ pub struct BotBrain {
     ticks: u32,
     wander_goal: Option<Vec3>,
     strafe: f32,
+    /// Chest currently targeted, and ticks spent trying to reach it.
+    chest_goal: Option<Vec3>,
+    chest_ticks: u32,
+    /// Chests we gave up on (unreachable): never try them again.
+    ignored_chests: Vec<Vec3>,
 }
 
 impl Default for BotBrain {
     fn default() -> Self {
-        Self { rng: Rng::new(std::process::id() as u64 ^ 0xB07), ticks: 0, wander_goal: None, strafe: 1.0 }
+        Self {
+            rng: Rng::new(std::process::id() as u64 ^ 0xB07),
+            ticks: 0,
+            wander_goal: None,
+            strafe: 1.0,
+            chest_goal: None,
+            chest_ticks: 0,
+            ignored_chests: Vec::new(),
+        }
     }
 }
 
@@ -67,6 +80,13 @@ fn world_to_axis(dir: Vec3, yaw: f32) -> Vec2 {
     Vec2::new(dir.dot(right), dir.dot(forward)).clamp_length_max(1.0)
 }
 
+/// Chests higher than this above the bot are ignored (they need parkour).
+const MAX_CHEST_CLIMB: f32 = 1.5;
+/// A monster closer than this: fight instead of going to a chest.
+const THREAT_DISTANCE: f32 = 12.0;
+/// Seconds (in ticks) before giving up on a chest it can't reach.
+const CHEST_GIVE_UP_TICKS: u32 = 8 * 60;
+
 pub fn think(brain: &mut BotBrain, view: &BotView) -> BotOutput {
     brain.ticks += 1;
     let me = view.me.mv.pos;
@@ -85,15 +105,39 @@ pub fn think(brain: &mut BotBrain, view: &BotView) -> BotOutput {
     // 1. Revive teammates.
     let ally = nearest(&mut view.downed_allies.iter().copied().filter(|p| p.distance(me) < 60.0));
     // 2. Buy chests when rich enough.
+    //    The bot can't do parkour: skip chests perched high above it, and
+    //    give up on a chest it couldn't reach in time.
+    let reachable = |p: &Vec3| p.y - me.y < MAX_CHEST_CLIMB && !brain.ignored_chests.iter().any(|i| i.distance(*p) < 0.5);
     let chest = nearest(
         &mut view
             .chests
             .iter()
-            .filter(|(p, k)| p.distance(me) < 50.0 && view.gold >= economy::chest_price(*k, view.difficulty))
+            .filter(|(p, k)| p.distance(me) < 50.0 && reachable(p) && view.gold >= economy::chest_price(*k, view.difficulty))
             .map(|(p, _)| *p),
     );
     // 3. Fight.
     let enemy = nearest(&mut view.mobs.iter().copied().filter(|p| p.distance(me) < 45.0));
+    // Monsters close by take priority over shopping (survive first).
+    let threatened = enemy.is_some_and(|e| e.distance(me) < THREAT_DISTANCE);
+    let chest = chest.filter(|_| !threatened);
+
+    // Give-up timer for the current chest.
+    match chest {
+        Some(c) if brain.chest_goal.is_some_and(|g| g.distance(c) < 0.5) => {
+            brain.chest_ticks += 1;
+            if brain.chest_ticks > CHEST_GIVE_UP_TICKS {
+                brain.ignored_chests.push(c);
+                brain.chest_goal = None;
+                brain.chest_ticks = 0;
+            }
+        }
+        Some(c) => {
+            brain.chest_goal = Some(c);
+            brain.chest_ticks = 0;
+        }
+        None => brain.chest_goal = None,
+    }
+    let chest = chest.filter(|c| !brain.ignored_chests.iter().any(|i| i.distance(*c) < 0.5));
 
     let (goal, look) = if let Some(a) = ally {
         if a.distance(me) < 2.0 {
@@ -163,7 +207,7 @@ impl Plugin for BotPlugin {
             .add_systems(
                 FixedPreUpdate,
                 bot_client_input
-                    .run_if(|c: Res<AppConfig>| c.launch == LaunchMode::BotClient)
+                    .run_if(|c: Res<AppConfig>| c.launch == LaunchMode::BotClient || c.autopilot)
                     .run_if(match_playing),
             )
             .add_systems(
@@ -354,5 +398,45 @@ fn bot_client_auto_restart(
             }
             Phase::Playing => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn view<'a>(me: &'a PlayerSim, mobs: &'a [Vec3], chests: &'a [(Vec3, ChestKind)]) -> BotView<'a> {
+        BotView { me, downed: false, gold: 1000, difficulty: 1.0, mobs, chests, downed_allies: &[] }
+    }
+
+    #[test]
+    fn ignores_chests_too_high() {
+        let me = PlayerSim::spawn_at(Vec3::ZERO);
+        let chests = [(Vec3::new(10.0, 8.0, 0.0), ChestKind::Item)];
+        let mut brain = BotBrain::default();
+        think(&mut brain, &view(&me, &[], &chests));
+        assert!(brain.chest_goal.is_none());
+    }
+
+    #[test]
+    fn gives_up_unreachable_chest() {
+        let me = PlayerSim::spawn_at(Vec3::ZERO);
+        let chests = [(Vec3::new(10.0, 1.0, 0.0), ChestKind::Item)];
+        let mut brain = BotBrain::default();
+        for _ in 0..=CHEST_GIVE_UP_TICKS + 1 {
+            think(&mut brain, &view(&me, &[], &chests));
+        }
+        assert_eq!(brain.ignored_chests.len(), 1);
+        assert!(brain.chest_goal.is_none());
+    }
+
+    #[test]
+    fn fights_before_shopping_when_threatened() {
+        let me = PlayerSim::spawn_at(Vec3::ZERO);
+        let chests = [(Vec3::new(10.0, 0.0, 0.0), ChestKind::Item)];
+        let mobs = [Vec3::new(0.0, 0.5, -5.0)];
+        let mut brain = BotBrain::default();
+        think(&mut brain, &view(&me, &mobs, &chests));
+        assert!(brain.chest_goal.is_none());
     }
 }

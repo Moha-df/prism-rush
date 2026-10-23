@@ -33,6 +33,10 @@ pub struct AppConfig {
     pub headless: bool,
     pub duration: Option<f32>,
     pub seed: Option<u64>,
+    /// Debug: save screenshots to this folder at fixed times, then quit.
+    pub shots: Option<String>,
+    /// Debug: the local player is driven by the bot brain.
+    pub autopilot: bool,
 }
 
 const SETTINGS_FILE: &str = "settings.txt";
@@ -52,6 +56,8 @@ impl Default for AppConfig {
             headless: false,
             duration: None,
             seed: None,
+            shots: None,
+            autopilot: false,
         }
     }
 }

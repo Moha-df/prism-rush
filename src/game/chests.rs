@@ -84,7 +84,7 @@ fn stream_chests(
         if !positions.iter().any(|p| p.distance(chest.pos) < CHEST_FORGET_DISTANCE)
             && let Some(e) = registry.spawned.remove(&chest.spot_id)
         {
-            commands.entity(e).despawn();
+            commands.entity(e).try_despawn();
         }
     }
 }
@@ -146,7 +146,7 @@ fn open_chests(
         open.opened = true;
         registry.opened.insert(chest.spot_id);
         registry.spawned.remove(&chest.spot_id);
-        commands.entity(entity).insert(DespawnAfter(10.0));
+        commands.entity(entity).try_insert(DespawnAfter(10.0));
         score.chests += 1;
 
         let owned: Vec<WeaponKind> = state.sim.arsenal.weapons.iter().map(|w| w.kind).collect();
@@ -171,7 +171,7 @@ fn despawn_after(mut commands: Commands, mut q: Query<(Entity, &mut DespawnAfter
     for (e, mut d) in &mut q {
         d.0 -= time.delta_secs();
         if d.0 <= 0.0 {
-            commands.entity(e).despawn();
+            commands.entity(e).try_despawn();
         }
     }
 }

@@ -172,7 +172,7 @@ pub struct PlayerStats {
 }
 
 pub const BASE_MAX_HP: f32 = 100.0;
-pub const BASE_REGEN: f32 = 0.6;
+pub const BASE_REGEN: f32 = 1.0;
 
 impl PlayerStats {
     pub fn from_inventory(inv: &Inventory) -> Self {

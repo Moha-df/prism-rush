@@ -103,7 +103,7 @@ fn record_snapshots(
             None => {
                 let mut b = InterpBuffer::default();
                 b.push(snap);
-                commands.entity(entity).insert((b, Transform::from_translation(state.pos), Visibility::default()));
+                commands.entity(entity).try_insert((b, Transform::from_translation(state.pos), Visibility::default()));
             }
         }
     }
@@ -124,7 +124,7 @@ fn record_snapshots(
         }
     }
     for entity in &projectiles {
-        commands.entity(entity).insert((Transform::default(), Visibility::default()));
+        commands.entity(entity).try_insert((Transform::default(), Visibility::default()));
     }
 }
 

@@ -163,7 +163,7 @@ fn on_client_disconnected(
     for (entity, owner, player) in &players {
         if owner.client == Some(id) {
             info!("player '{}' left", player.name);
-            commands.entity(entity).despawn();
+            commands.entity(entity).try_despawn();
         }
     }
 }
@@ -245,7 +245,7 @@ pub fn despawn_world_entities(
     q: Query<Entity, Or<(With<Mob>, With<Chest>, With<Projectile>)>>,
 ) {
     for e in &q {
-        commands.entity(e).despawn();
+        commands.entity(e).try_despawn();
     }
 }
 
@@ -255,7 +255,7 @@ pub fn despawn_all_game_entities(
     q: Query<Entity, Or<(With<Replicated>, With<Remote>)>>,
 ) {
     for e in &q {
-        commands.entity(e).despawn();
+        commands.entity(e).try_despawn();
     }
 }
 
