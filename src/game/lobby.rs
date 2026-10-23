@@ -9,6 +9,7 @@ use bevy_replicon::prelude::*;
 use super::chests::ChestRegistry;
 use super::mobs::Director;
 use super::players::{InputQueue, Intent, Owner, PlayerScore};
+pub use crate::net::protocol::PendingChoice;
 use super::world::TerrainRes;
 use super::SimTick;
 use crate::bot::BotBrain;
@@ -94,6 +95,7 @@ fn player_bundle(slot: u8, name: String, is_bot: bool, owner: Owner) -> impl Bun
         InputQueue::default(),
         Intent::default(),
         PlayerScore::default(),
+        super::players::HurtClock::default(),
     )
 }
 
@@ -244,7 +246,7 @@ pub fn back_to_lobby(mut commands: Commands, mut info: Single<&mut MatchInfo>, p
     }
     commands.run_system_cached(despawn_world_entities);
     for e in &players {
-        commands.entity(e).remove::<(PlayerState, Health, Wallet, Items)>();
+        commands.entity(e).remove::<(PlayerState, Health, Wallet, Items, PendingChoice)>();
     }
     info.phase = Phase::Lobby;
     info!("back to lobby");
@@ -253,7 +255,7 @@ pub fn back_to_lobby(mut commands: Commands, mut info: Single<&mut MatchInfo>, p
 /// Despawns monsters, chests and projectiles (the run's world).
 pub fn despawn_world_entities(
     mut commands: Commands,
-    q: Query<Entity, Or<(With<Mob>, With<Chest>, With<Projectile>)>>,
+    q: Query<Entity, Or<(With<Mob>, With<Chest>, With<Projectile>, With<WeaponPickup>)>>,
 ) {
     for e in &q {
         commands.entity(e).try_despawn();

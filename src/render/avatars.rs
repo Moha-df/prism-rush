@@ -76,6 +76,7 @@ fn attach_models(
     mobs: Query<(Entity, &Mob), NeedsModel>,
     chests: Query<(Entity, &Chest), NeedsModel>,
     projectiles: Query<(Entity, &Projectile), NeedsModel>,
+    pickups: Query<(Entity, &WeaponPickup), NeedsModel>,
 ) {
     let mut attach = |commands: &mut Commands, entity: Entity, part: super::model::Part, stride: f32| {
         let model = spawn_child_model(commands, &mut cache, &mut meshes, &mut materials, entity, &part);
@@ -94,6 +95,9 @@ fn attach_models(
     for (e, p) in &projectiles {
         attach(&mut commands, e, models::projectile(p.kind), 1.0);
     }
+    for (e, p) in &pickups {
+        attach(&mut commands, e, models::weapon_pickup(p.kind), 1.0);
+    }
 }
 
 /// Back in the lobby, players lose their run components: remove their model.
@@ -108,11 +112,19 @@ fn detach_player_models(
 }
 
 /// Chests never move: give them a transform once.
-fn place_chests(mut commands: Commands, chests: Query<(Entity, &Chest), Without<Transform>>) {
+fn place_chests(
+    mut commands: Commands,
+    chests: Query<(Entity, &Chest), Without<Transform>>,
+    pickups: Query<(Entity, &WeaponPickup), Without<Transform>>,
+) {
     for (e, c) in &chests {
         commands
             .entity(e)
-            .insert((Transform::from_translation(c.pos).with_rotation(Quat::from_rotation_y(c.yaw)), Visibility::default()));
+            .try_insert((Transform::from_translation(c.pos).with_rotation(Quat::from_rotation_y(c.yaw)), Visibility::default()));
+    }
+    // Weapons on the ground don't move either.
+    for (e, p) in &pickups {
+        commands.entity(e).try_insert((Transform::from_translation(p.pos), Visibility::default()));
     }
 }
 

@@ -94,10 +94,11 @@ fn spawn_cameras(mut commands: Commands, config: Res<AppConfig>) {
 fn grab_cursor(
     state: Res<State<AppState>>,
     paused: Res<Paused>,
+    choosing: Res<crate::ui::cards::ChoosingCard>,
     mut cursor: Query<&mut CursorOptions>,
 ) {
     let Ok(mut cursor) = cursor.single_mut() else { return };
-    let want_grab = *state.get() == AppState::InGame && !paused.0;
+    let want_grab = *state.get() == AppState::InGame && !paused.0 && !choosing.0;
     let grabbed = cursor.grab_mode != CursorGrabMode::None;
     if want_grab != grabbed {
         cursor.grab_mode = if want_grab { CursorGrabMode::Locked } else { CursorGrabMode::None };
@@ -114,6 +115,7 @@ fn read_input(
     motion: Res<AccumulatedMouseMotion>,
     scroll: Res<AccumulatedMouseScroll>,
     config: Res<AppConfig>,
+    choosing: Res<crate::ui::cards::ChoosingCard>,
     mut input: ResMut<InputState>,
 ) {
     if config.autopilot {
@@ -124,8 +126,8 @@ fn read_input(
         input.move_axis = Vec2::ZERO;
         return;
     }
-    // Mouse look.
-    let sens = 0.0022 * config.sensitivity;
+    // Mouse look (not while picking a card: the mouse is used to click).
+    let sens = if choosing.0 { 0.0 } else { 0.0022 * config.sensitivity };
     input.yaw -= motion.delta.x * sens;
     input.pitch = (input.pitch - motion.delta.y * sens).clamp(-FRAC_PI_2 + 0.01, FRAC_PI_2 - 0.01);
     input.yaw = input.yaw.rem_euclid(std::f32::consts::TAU);
@@ -159,7 +161,11 @@ fn read_input(
             keys.just_pressed(KeyCode::KeyQ) || mouse.just_pressed(MouseButton::Back),
             buttons::DASH,
         ),
-        (mouse.pressed(MouseButton::Left), mouse.just_pressed(MouseButton::Left), buttons::FIRE),
+        (
+            mouse.pressed(MouseButton::Left) && !choosing.0,
+            mouse.just_pressed(MouseButton::Left) && !choosing.0,
+            buttons::FIRE,
+        ),
         (keys.pressed(KeyCode::KeyR), keys.just_pressed(KeyCode::KeyR), buttons::RELOAD),
         (keys.pressed(KeyCode::KeyE), keys.just_pressed(KeyCode::KeyE), buttons::INTERACT),
     ];
@@ -179,7 +185,8 @@ fn read_input(
     }
     let digits = [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4, KeyCode::Digit5, KeyCode::Digit6];
     for (i, key) in digits.iter().enumerate() {
-        if keys.just_pressed(*key) {
+        // While choosing a card, digits pick the card instead.
+        if keys.just_pressed(*key) && !choosing.0 {
             input.select_slot = i as u8;
         }
     }

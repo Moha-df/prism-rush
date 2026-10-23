@@ -418,7 +418,7 @@ fn update_weapon(
             .weapons
             .iter()
             .enumerate()
-            .map(|(i, w)| if i == a.current { format!("[{} {}]", i + 1, w.kind.def().name) } else { format!("{}", i + 1) })
+            .map(|(i, w)| if i == a.current { format!("[{} {}]", i + 1, w.kind.def().name) } else { format!("{} {}", i + 1, w.kind.def().name) })
             .collect::<Vec<_>>()
             .join("  "));
     }
@@ -436,6 +436,7 @@ fn update_weapon(
 fn update_items(
     mut commands: Commands,
     local: Res<LocalPlayer>,
+    icons: Res<crate::render::icons::Icons>,
     players: Query<(&Player, Ref<Items>)>,
     row: Query<(Entity, Option<&Children>), With<ItemsRow>>,
     mut shown: Local<Option<crate::shared::items::Inventory>>,
@@ -456,17 +457,36 @@ fn update_items(
         if n == 0 {
             continue;
         }
-        let [r, g, b] = item.color();
+        let [r, g, b] = item.rarity().color();
+        let cell = commands
+            .spawn((
+                Node {
+                    width: Val::Px(40.0),
+                    height: Val::Px(40.0),
+                    border: UiRect::all(Val::Px(2.0)),
+                    border_radius: BorderRadius::all(Val::Px(6.0)),
+                    ..default()
+                },
+                BorderColor::all(Color::srgb(r, g, b)),
+                BackgroundColor(Color::srgba(0.05, 0.04, 0.08, 0.7)),
+                ChildOf(row),
+            ))
+            .id();
         commands.spawn((
-            Node {
-                padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
-                border_radius: BorderRadius::all(Val::Px(4.0)),
-                ..default()
-            },
-            BackgroundColor(Color::srgba(r * 0.5, g * 0.5, b * 0.5, 0.85)),
-            ChildOf(row),
-            children![label(format!("{} x{}", item.name(), n), 14.0, TEXT)],
+            ImageNode::new(icons.items.get(&item).cloned().unwrap_or_default()),
+            Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() },
+            ChildOf(cell),
         ));
+        if n > 1 {
+            commands.spawn((
+                Text::new(format!("{n}")),
+                bold(13.0),
+                TextColor(TEXT),
+                TextShadow::default(),
+                Node { position_type: PositionType::Absolute, right: Val::Px(2.0), bottom: Val::Px(0.0), ..default() },
+                ChildOf(cell),
+            ));
+        }
     }
 }
 
@@ -477,6 +497,8 @@ fn update_prompt(
     players: Query<LocalQuery>,
     states: Query<(&Player, &PlayerState, &Health)>,
     chests: Query<(&Chest, &ChestOpen)>,
+    pickups: Query<&WeaponPickup>,
+    pending: Query<(&Player, &Items, Has<PendingChoice>)>,
     info: Query<&MatchInfo>,
     mut prompt: Query<&mut Text, (With<PromptText>, Without<DownedText>)>,
     mut downed: Query<&mut Text, (With<DownedText>, Without<PromptText>)>,
@@ -503,19 +525,42 @@ fn update_prompt(
         {
             text = format!("[E] Maintenir pour réanimer {}", p.name);
             progress = Some(h.revive);
+        } else if let Some(pickup) = pickups
+            .iter()
+            .filter(|p| p.pos.distance(pos + Vec3::Y * 0.9) < crate::game::chests::PICKUP_RANGE)
+            .min_by(|a, b| a.pos.distance(pos).total_cmp(&b.pos.distance(pos)))
+        {
+            let def = pickup.kind.def();
+            let a = &pred.sim.arsenal;
+            text = if a.weapons.len() >= crate::shared::weapons::MAX_WEAPONS && !a.has(pickup.kind) {
+                format!("[E] Prendre {} ({}) — remplace {}", def.name, def.rarity.name(), a.current_kind().def().name)
+            } else {
+                format!("[E] Prendre {} ({})", def.name, def.rarity.name())
+            };
         } else if let Some((chest, _)) = chests
             .iter()
             .filter(|(c, o)| !o.opened && c.pos.distance(pos + Vec3::Y * 0.5) < INTERACT_RANGE)
             .min_by(|a, b| a.0.pos.distance(pos).total_cmp(&b.0.pos.distance(pos)))
         {
             let wave = info.single().map(|m| m.wave).unwrap_or(1);
-            let price = economy::chest_price(chest.kind, wave);
+            let (items, choosing) = pending
+                .iter()
+                .find(|(p, ..)| p.slot == me.slot)
+                .map(|(_, i, c)| (i.0, c))
+                .unwrap_or_default();
+            let stats = PlayerStats::from_inventory(&items);
+            let price = crate::game::chests::player_price(chest.kind, wave, &stats);
             let what = chest.kind.name();
-            text = if wallet.gold >= price {
-                format!("[E] Ouvrir le {what} — {price} or")
-            } else {
-                format!("{what} : il te faut {price} or (tu as {})", wallet.gold)
-            };
+            if choosing {
+                text = "Choisis d'abord ta carte !".to_string();
+            } else
+            {
+                text = if wallet.gold >= price {
+                    format!("[E] Ouvrir le {what} — {price} or")
+                } else {
+                    format!("{what} : il te faut {price} or (tu as {})", wallet.gold)
+                };
+            }
         }
     }
     if prompt.0 != text {
@@ -598,13 +643,18 @@ fn toasts_from_events(
     let name = |slot: u8| players.iter().find(|p| p.slot == slot).map(|p| p.name.clone()).unwrap_or_default();
     for ev in events.read() {
         let (text, color) = match ev {
-            GameEvent::ChestOpened { slot, reward, .. } => {
-                let what = match reward {
-                    Reward::Item(i) => format!("{} ({})", i.name(), i.description()),
-                    Reward::Weapon(w) => format!("arme : {}", w.def().name),
-                };
-                (format!("{} obtient {}", name(*slot), what), player_color(*slot))
-            }
+            GameEvent::ChestOpened { .. } => continue,
+            GameEvent::Gained { slot, reward } => match reward {
+                Reward::Item(i) => {
+                    let [r, g, b] = i.rarity().color();
+                    (format!("{} obtient {} — {}", name(*slot), i.name(), i.description()), Color::srgb(r, g, b))
+                }
+                Reward::Weapon(w) => {
+                    let [r, g, b] = w.rarity().color();
+                    (format!("{} prend : {}", name(*slot), w.def().name), Color::srgb(r, g, b))
+                }
+            },
+            GameEvent::AnkhUsed { slot } => (format!("L'Ankh a sauvé {} !", name(*slot)), crate::render::palette::GOLD),
             GameEvent::Downed { slot } => (format!("{} est à terre !", name(*slot)), Color::srgb(1.0, 0.35, 0.3)),
             GameEvent::Revived { slot } => (format!("{} est de retour !", name(*slot)), Color::srgb(0.4, 1.0, 0.6)),
             GameEvent::BossSpawned => ("Un COLOSSE approche !".to_string(), crate::render::palette::GLOW_ORANGE),
@@ -726,6 +776,7 @@ fn spawn_world_labels(
     local: Res<LocalPlayer>,
     players: Query<(Entity, &Player), Added<PlayerState>>,
     chests: Query<(Entity, &Chest), Added<Chest>>,
+    new_pickups: Query<(Entity, &WeaponPickup), Added<WeaponPickup>>,
     info: Query<&MatchInfo>,
 ) {
     for (e, p) in &players {
@@ -738,6 +789,19 @@ fn spawn_world_labels(
             Text::new(p.name.clone()),
             bold(18.0),
             TextColor(player_color(p.slot)),
+            TextShadow::default(),
+            Node { position_type: PositionType::Absolute, ..default() },
+            Visibility::Hidden,
+        ));
+    }
+    for (e, p) in &new_pickups {
+        let [r, g, b] = p.kind.rarity().color();
+        commands.spawn((
+            DespawnOnExit(AppState::InGame),
+            WorldLabel { target: e, height: 0.9, max_distance: 18.0 },
+            Text::new(p.kind.def().name),
+            bold(16.0),
+            TextColor(Color::srgb(r, g, b)),
             TextShadow::default(),
             Node { position_type: PositionType::Absolute, ..default() },
             Visibility::Hidden,

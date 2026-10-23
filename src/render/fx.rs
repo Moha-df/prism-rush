@@ -246,6 +246,10 @@ fn on_server_fx(
                 }
             }
             Fx::Gold { .. } => {}
+            Fx::Arc { from, to } => {
+                tracer(&mut commands, &mut cache, &mut meshes, &mut materials, *from, *to, palette::GLOW_CYAN, 0.08);
+                burst(&mut commands, &mut cache, &mut meshes, &mut materials, rng, *to, 6, palette::GLOW_CYAN, 6.0, 5.0, 0.06, 0.25, 0.0);
+            }
             Fx::Warp { from, to } => {
                 burst(&mut commands, &mut cache, &mut meshes, &mut materials, rng, *from + Vec3::Y, 12, palette::GLOW_MAGENTA, 4.0, 4.0, 0.12, 0.5, -1.0);
                 burst(&mut commands, &mut cache, &mut meshes, &mut materials, rng, *to + Vec3::Y, 16, palette::GLOW_MAGENTA, 4.0, 5.0, 0.12, 0.6, -1.0);
@@ -269,14 +273,23 @@ fn on_game_events(
     let rng = &mut rng.0;
     for ev in events.read() {
         match ev {
-            GameEvent::ChestOpened { pos, slot, .. } => {
+            GameEvent::ChestOpened { pos, slot, kind } => {
                 let p = *pos + Vec3::Y * 0.6;
-                burst(&mut commands, &mut cache, &mut meshes, &mut materials, rng, p, 25, palette::GOLD, 4.0, 7.0, 0.1, 1.2, 9.0);
+                let color = crate::ui::hud::chest_color(*kind);
+                burst(&mut commands, &mut cache, &mut meshes, &mut materials, rng, p, 25, color, 4.0, 7.0, 0.1, 1.2, 9.0);
                 burst(&mut commands, &mut cache, &mut meshes, &mut materials, rng, p, 15, player_color(*slot), 4.0, 5.0, 0.1, 1.0, 6.0);
-                flash_light(&mut commands, p + Vec3::Y, palette::GOLD, 400_000.0, 12.0, 0.8);
-                // A beam of light rising from the chest.
-                tracer(&mut commands, &mut cache, &mut meshes, &mut materials, p, p + Vec3::Y * 12.0, palette::GOLD, 0.25);
+                flash_light(&mut commands, p + Vec3::Y, color, 400_000.0, 12.0, 0.8);
+                // A beam of light rising from the chest, colored by chest rarity.
+                tracer(&mut commands, &mut cache, &mut meshes, &mut materials, p, p + Vec3::Y * 12.0, color, 0.25);
                 sfx.write(PlaySfx::at(Sfx::ChestOpen, *pos));
+            }
+            GameEvent::Gained { slot, .. } => {
+                if Some(*slot) == local.slot {
+                    sfx.write(PlaySfx::ui(Sfx::Coin));
+                }
+            }
+            GameEvent::AnkhUsed { .. } => {
+                sfx.write(PlaySfx::ui(Sfx::Revived));
             }
             GameEvent::Downed { slot } => {
                 sfx.write(PlaySfx { volume: if Some(*slot) == local.slot { 1.0 } else { 0.6 }, ..PlaySfx::ui(Sfx::Downed) });

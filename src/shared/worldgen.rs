@@ -332,7 +332,8 @@ impl WorldGen {
                 }
                 // Reward climbing: a chest on the highest platform.
                 if let Some(t) = top {
-                    let kind = if rng.chance(0.35) { ChestKind::Weapon } else { ChestKind::Small };
+                    // Climbing pays: better chests up there.
+                    let kind = *rng.pick(&[ChestKind::Weapon, ChestKind::Large, ChestKind::Large, ChestKind::Small]);
                     add_chest(&mut chunk, &mut rng, t, kind);
                 }
                 // Broken walls around.
@@ -393,7 +394,13 @@ impl WorldGen {
                     // v = sqrt(2 g h) with some margin; gravity is in movement.rs.
                     strength: (2.0 * super::movement::GRAVITY * (g + height + 3.0 - pg)).sqrt(),
                 });
-                let kind = if rng.chance(0.5) { ChestKind::Weapon } else { ChestKind::Small };
+                let kind = if rng.chance(0.12) {
+                    ChestKind::Legendary
+                } else if rng.chance(0.5) {
+                    ChestKind::Weapon
+                } else {
+                    ChestKind::Large
+                };
                 add_chest(&mut chunk, &mut rng, Vec3::new(p.x, g + height + 0.4, p.y), kind);
             }
             // 4: Crystal field — tall shards, a little alien.
@@ -417,7 +424,14 @@ impl WorldGen {
         {
             let pos = Vec3::new(p.x, self.ground_height(p.x, p.y), p.y);
             if !chunk.solids.iter().any(|s| s.push_out_xz(p, 1.2).is_some()) {
-                let kind = if rng.chance(0.15) { ChestKind::Weapon } else { ChestKind::Small };
+                let roll = rng.next_f32();
+                let kind = if roll < 0.12 {
+                    ChestKind::Weapon
+                } else if roll < 0.24 {
+                    ChestKind::Large
+                } else {
+                    ChestKind::Small
+                };
                 add_chest(&mut chunk, &mut rng, pos, kind);
             }
         }

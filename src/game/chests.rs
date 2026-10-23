@@ -7,11 +7,12 @@ use bevy::prelude::*;
 use bevy_replicon::prelude::*;
 
 use super::players::{Intent, PlayerScore};
+use crate::net::protocol::PendingChoice;
 use super::world::TerrainRes;
 use super::{ServerSet, SimTick};
 use crate::net::protocol::*;
 use crate::shared::economy::{self, ChestKind};
-use crate::shared::items::{ItemKind, PlayerStats};
+use crate::shared::items::PlayerStats;
 use crate::shared::rng::{hash_combine, Rng};
 use crate::shared::weapons::WeaponKind;
 use crate::shared::worldgen::{chunk_of, CHUNK_SIZE};
@@ -36,8 +37,9 @@ impl Plugin for ChestsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ChestRegistry>().add_systems(
             FixedUpdate,
-            (stream_chests, open_chests, despawn_after).chain().in_set(ServerSet::World),
-        );
+            (stream_chests, pick_up_weapons, open_chests, despawn_after).chain().in_set(ServerSet::World),
+        )
+        .add_systems(PreUpdate, receive_choices.after(ServerSystems::Receive).run_if(in_state(ServerState::Running)));
     }
 }
 
@@ -89,35 +91,73 @@ fn stream_chests(
     }
 }
 
-/// Picks the reward of a chest. Weapon chests prefer weapons you don't own.
-pub fn roll_reward(kind: ChestKind, owned: &[WeaponKind], rng: &mut Rng) -> Reward {
-    match kind {
-        ChestKind::Small | ChestKind::Large | ChestKind::Legendary => Reward::Item(ItemKind::roll(rng)),
-        ChestKind::Weapon => {
-            let candidates: Vec<WeaponKind> = WeaponKind::ALL
-                .into_iter()
-                .filter(|w| *w != WeaponKind::Pistol && !owned.contains(w))
-                .collect();
-            if candidates.is_empty() {
-                // Everything owned: a weapon chest still gives something useful.
-                Reward::Item(ItemKind::roll(rng))
-            } else {
-                Reward::Weapon(*rng.pick(&candidates))
-            }
+/// Weapon from a weapon crate: rarity odds, never one you already carry.
+pub fn roll_weapon(owned: &[WeaponKind], rng: &mut Rng) -> WeaponKind {
+    let mut exclude = owned.to_vec();
+    exclude.push(WeaponKind::Pistol);
+    WeaponKind::roll([50.0, 32.0, 14.0, 4.0], &exclude, rng)
+}
+
+pub const PICKUP_RANGE: f32 = 2.5;
+
+/// Pressing E near a weapon on the ground takes it. With 2 weapons already,
+/// the weapon in hand is dropped in its place.
+fn pick_up_weapons(
+    mut commands: Commands,
+    mut players: Query<(&Player, &mut PlayerState, &mut Intent, &Health, &Items)>,
+    pickups: Query<(Entity, &WeaponPickup)>,
+    mut taken: Local<Vec<Entity>>,
+    mut events: MessageWriter<ToClients<GameEvent>>,
+) {
+    taken.clear();
+    for (player, mut state, mut intent, health, items) in &mut players {
+        if !intent.interact_pressed || health.downed {
+            continue;
         }
+        let pos = state.sim.mv.pos + Vec3::Y * 0.9;
+        let nearest = pickups
+            .iter()
+            .filter(|(e, p)| !taken.contains(e) && p.pos.distance(pos) < PICKUP_RANGE)
+            .min_by(|a, b| a.1.pos.distance(pos).total_cmp(&b.1.pos.distance(pos)));
+        let Some((entity, pickup)) = nearest else { continue };
+        // This press is used: don't also open a chest with it.
+        intent.interact_pressed = false;
+        taken.push(entity);
+        commands.entity(entity).try_despawn();
+        let stats = PlayerStats::from_inventory(&items.0);
+        if let Some(dropped) = state.sim.arsenal.give(pickup.kind, &stats) {
+            let forward = Vec3::new(-state.yaw.sin(), 0.0, -state.yaw.cos());
+            commands.spawn((Replicated, WeaponPickup { kind: dropped, pos: pos + forward * 0.8 }));
+        }
+        info!("{} took {:?}", player.name, pickup.kind);
+        events.write(ToClients { targets: SendTargets::All, message: GameEvent::Gained { slot: player.slot, reward: Reward::Weapon(pickup.kind) } });
     }
 }
 
+/// Spawns a chest that does not come from the world generator (boss loot).
+pub fn spawn_loot_chest(commands: &mut Commands, kind: ChestKind, pos: Vec3, id_seed: u64) -> Entity {
+    commands
+        .spawn((
+            Replicated,
+            Chest { spot_id: hash_combine(&[id_seed, 0x1007]), kind, pos, yaw: 0.0 },
+            ChestOpen::default(),
+        ))
+        .id()
+}
+
 type OpenerQuery<'a> = (
+    Entity,
     &'a Player,
-    &'a mut PlayerState,
+    &'a PlayerState,
     &'a Intent,
     &'a Health,
     &'a mut Wallet,
-    &'a mut Items,
+    &'a Items,
     &'a mut PlayerScore,
+    Has<PendingChoice>,
 );
 
+/// Opening a chest: pay, then either draw cards (item chests) or get a weapon.
 fn open_chests(
     mut commands: Commands,
     mut players: Query<OpenerQuery>,
@@ -127,8 +167,9 @@ fn open_chests(
     tick: Res<SimTick>,
     mut events: MessageWriter<ToClients<GameEvent>>,
 ) {
-    for (player, mut state, intent, health, mut wallet, mut items, mut score) in &mut players {
-        if !intent.interact_pressed || health.downed {
+    for (player_entity, player, state, intent, health, mut wallet, items, mut score, pending) in &mut players {
+        // One choice at a time: pick your card before opening another chest.
+        if !intent.interact_pressed || health.downed || pending {
             continue;
         }
         let pos = state.sim.mv.pos;
@@ -138,7 +179,8 @@ fn open_chests(
             .min_by(|a, b| a.1.pos.distance(pos).total_cmp(&b.1.pos.distance(pos)));
         let Some((entity, chest, mut open)) = nearest else { continue };
 
-        let price = economy::chest_price(chest.kind, info.wave);
+        let stats = PlayerStats::from_inventory(&items.0);
+        let price = player_price(chest.kind, info.wave, &stats);
         if wallet.gold < price {
             continue;
         }
@@ -148,22 +190,61 @@ fn open_chests(
         registry.spawned.remove(&chest.spot_id);
         commands.entity(entity).try_insert(DespawnAfter(10.0));
         score.chests += 1;
-
-        let owned: Vec<WeaponKind> = state.sim.arsenal.weapons.iter().map(|w| w.kind).collect();
-        let mut rng = Rng::new(hash_combine(&[chest.spot_id, u64::from(tick.0), u64::from(player.slot)]));
-        let reward = roll_reward(chest.kind, &owned, &mut rng);
-        match reward {
-            Reward::Item(item) => items.0.add(item),
-            Reward::Weapon(w) => {
-                let stats = PlayerStats::from_inventory(&items.0);
-                state.sim.arsenal.give(w, &stats);
-            }
-        }
-        info!("{} opened a {:?} chest for {price} gold: {reward:?}", player.name, chest.kind);
         events.write(ToClients {
             targets: SendTargets::All,
-            message: GameEvent::ChestOpened { pos: chest.pos, slot: player.slot, reward },
+            message: GameEvent::ChestOpened { pos: chest.pos, slot: player.slot, kind: chest.kind },
         });
+
+        let mut rng = Rng::new(hash_combine(&[chest.spot_id, u64::from(tick.0), u64::from(player.slot)]));
+        if chest.kind == ChestKind::Weapon {
+            // The weapon pops out of the crate onto the ground: walk to it and press E.
+            let owned: Vec<WeaponKind> = state.sim.arsenal.weapons.iter().map(|w| w.kind).collect();
+            let weapon = roll_weapon(&owned, &mut rng);
+            info!("{} opened a weapon crate for {price} gold: {weapon:?}", player.name);
+            let toward_player = (pos - chest.pos).with_y(0.0).normalize_or_zero();
+            commands.spawn((Replicated, WeaponPickup { kind: weapon, pos: chest.pos + toward_player * 1.2 + Vec3::Y * 0.9 }));
+        } else {
+            let options = crate::shared::items::roll_cards(chest.kind, stats.luck, stats.cards, &mut rng);
+            info!("{} opened a {:?} chest for {price} gold: cards {options:?}", player.name, chest.kind);
+            commands.entity(player_entity).try_insert(PendingChoice { chest: chest.kind, options });
+        }
+    }
+}
+
+/// Price of a chest for a given player (Treasure Map discount).
+pub fn player_price(kind: ChestKind, wave: u32, stats: &PlayerStats) -> u32 {
+    ((economy::chest_price(kind, wave) as f32) * stats.price_mult).round() as u32
+}
+
+/// Applies the card chosen by a player.
+pub fn apply_choice(
+    commands: &mut Commands,
+    entity: Entity,
+    player: &Player,
+    choice: &PendingChoice,
+    index: usize,
+    items: &mut Items,
+    events: &mut MessageWriter<ToClients<GameEvent>>,
+) {
+    let Some(item) = choice.options.get(index).copied() else { return };
+    items.0.add(item);
+    commands.entity(entity).remove::<PendingChoice>();
+    info!("{} chose {item:?}", player.name);
+    events.write(ToClients { targets: SendTargets::All, message: GameEvent::Gained { slot: player.slot, reward: Reward::Item(item) } });
+}
+
+fn receive_choices(
+    mut commands: Commands,
+    mut choices: MessageReader<FromClient<ChooseCard>>,
+    mut players: Query<(Entity, &Player, &super::players::Owner, &PendingChoice, &mut Items)>,
+    mut events: MessageWriter<ToClients<GameEvent>>,
+) {
+    for msg in choices.read() {
+        let Some((entity, player, _, choice, mut items)) = players.iter_mut().find(|(_, _, o, ..)| o.client == Some(msg.client_id))
+        else {
+            continue;
+        };
+        apply_choice(&mut commands, entity, player, choice, msg.index as usize, &mut items, &mut events);
     }
 }
 
@@ -179,29 +260,25 @@ fn despawn_after(mut commands: Commands, mut q: Query<(Entity, &mut DespawnAfter
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shared::items::{Inventory, ItemKind};
 
     #[test]
-    fn weapon_chest_gives_new_weapons_first() {
+    fn weapon_crate_gives_new_weapons_first() {
         let mut rng = Rng::new(1);
         let owned = vec![WeaponKind::Pistol, WeaponKind::Shotgun];
         for _ in 0..200 {
-            match roll_reward(ChestKind::Weapon, &owned, &mut rng) {
-                Reward::Weapon(w) => assert!(!owned.contains(&w)),
-                Reward::Item(_) => panic!("should give a weapon"),
-            }
+            let w = roll_weapon(&owned, &mut rng);
+            assert!(!owned.contains(&w));
         }
     }
 
     #[test]
-    fn weapon_chest_with_everything_gives_item() {
-        let mut rng = Rng::new(2);
-        let owned = WeaponKind::ALL.to_vec();
-        assert!(matches!(roll_reward(ChestKind::Weapon, &owned, &mut rng), Reward::Item(_)));
-    }
-
-    #[test]
-    fn item_chest_gives_items() {
-        let mut rng = Rng::new(3);
-        assert!(matches!(roll_reward(ChestKind::Small, &[], &mut rng), Reward::Item(_)));
+    fn treasure_map_lowers_price() {
+        let base = PlayerStats::from_inventory(&Inventory::default());
+        let mut inv = Inventory::default();
+        inv.add(ItemKind::TreasureMap);
+        let map = PlayerStats::from_inventory(&inv);
+        assert!(player_price(ChestKind::Large, 3, &map) < player_price(ChestKind::Large, 3, &base));
+        assert_eq!(player_price(ChestKind::Small, 1, &base), economy::chest_price(ChestKind::Small, 1));
     }
 }

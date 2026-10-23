@@ -104,13 +104,27 @@ pub struct MoveStats {
     pub air_jumps: u8,
     pub dash_charges: u8,
     pub jump_mult: f32,
+    pub dash_recharge_mult: f32,
+    pub slide_mult: f32,
+    pub air_control_mult: f32,
 }
 
 impl Default for MoveStats {
     fn default() -> Self {
-        Self { speed_mult: 1.0, air_jumps: 1, dash_charges: 1, jump_mult: 1.0 }
+        Self {
+            speed_mult: 1.0,
+            air_jumps: 1,
+            dash_charges: 1,
+            jump_mult: 1.0,
+            dash_recharge_mult: 1.0,
+            slide_mult: 1.0,
+            air_control_mult: 1.0,
+        }
     }
 }
+
+/// Speed bonus while hasted (Bloodlust item).
+pub const HASTE_MULT: f32 = 1.25;
 
 /// Complete movement state of a player. Replicated to clients for reconciliation.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -129,6 +143,8 @@ pub struct MoveState {
     pub slide_timer: f32,
     /// Buttons of the previous tick, to detect "just pressed" edges.
     pub prev_buttons: u16,
+    /// Remaining haste time (set by the server on kills, predicted after).
+    pub haste: f32,
 }
 
 impl MoveState {
@@ -185,7 +201,9 @@ pub fn simulate_movement(
 
     // --- Dash recharge.
     let max_dash = f32::from(stats.dash_charges);
-    s.dash_energy = (s.dash_energy + dt / DASH_RECHARGE).min(max_dash);
+    s.dash_energy = (s.dash_energy + dt * stats.dash_recharge_mult / DASH_RECHARGE).min(max_dash);
+    let haste = if s.haste > 0.0 { HASTE_MULT } else { 1.0 };
+    s.haste = (s.haste - dt).max(0.0);
 
     if downed {
         s.slide_timer = 0.0;
@@ -202,7 +220,7 @@ pub fn simulate_movement(
         }
     } else {
         let sprinting = input.held(buttons::SPRINT) && axis.y > 0.1;
-        let speed = if sprinting { SPRINT_SPEED } else { WALK_SPEED } * stats.speed_mult;
+        let speed = if sprinting { SPRINT_SPEED } else { WALK_SPEED } * stats.speed_mult * haste;
 
         // --- Start a dash.
         if pressed(buttons::DASH) && s.dash_energy >= 1.0 {
@@ -218,7 +236,7 @@ pub fn simulate_movement(
             let hv = Vec2::new(s.vel.x, s.vel.z);
             let dir = if hv.length() > 1.0 { hv.normalize() } else { Vec2::new(wish.x, wish.z).normalize_or_zero() };
             if dir != Vec2::ZERO {
-                let boosted = (hv.length() + SLIDE_BOOST).max(SPRINT_SPEED * stats.speed_mult + 2.0);
+                let boosted = (hv.length() + SLIDE_BOOST * stats.slide_mult).max(SPRINT_SPEED * stats.speed_mult * stats.slide_mult + 2.0);
                 s.vel.x = dir.x * boosted;
                 s.vel.z = dir.y * boosted;
                 s.slide_timer = SLIDE_TIME;
@@ -250,7 +268,7 @@ pub fn simulate_movement(
             // *brake* below the current speed (keeps dash/pad/slide momentum).
             let cur = Vec2::new(s.vel.x, s.vel.z);
             let target = wish2 * speed.max(cur.length());
-            let accel = if wish2 == Vec2::ZERO { 2.0 } else { AIR_ACCEL };
+            let accel = if wish2 == Vec2::ZERO { 2.0 } else { AIR_ACCEL * stats.air_control_mult };
             s.vel = accelerate(s.vel, target, accel, dt);
         }
 

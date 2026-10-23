@@ -10,7 +10,7 @@ use std::collections::VecDeque;
 use bevy::prelude::*;
 use bevy_replicon::prelude::*;
 
-use super::players::{Owner, PendingShots, PlayerScore};
+use super::players::{HurtClock, PendingShots, PlayerScore};
 use super::world::TerrainRes;
 use super::{ServerSet, SimTick};
 use crate::net::protocol::*;
@@ -19,7 +19,7 @@ use crate::shared::items::PlayerStats;
 use crate::shared::mobs::MobKind;
 use crate::shared::movement::{DT, PLAYER_HEIGHT};
 use crate::shared::rng::Rng;
-use crate::shared::weapons::WeaponKind;
+use crate::shared::weapons::{ProjectileType, WeaponKind};
 
 /// Max lag compensation window, in ticks (~330 ms).
 pub const MAX_REWIND_TICKS: u32 = 20;
@@ -38,6 +38,8 @@ pub struct DamageMob {
 pub struct DamagePlayer {
     pub target: Entity,
     pub amount: f32,
+    /// Monster that hit in melee (for Thorns), if any.
+    pub attacker: Option<Entity>,
 }
 
 #[derive(Message, Clone, Copy, Debug)]
@@ -150,10 +152,10 @@ fn mob_capsule(kind: MobKind, pos: Vec3) -> (Vec3, Vec3, f32) {
 fn resolve_shots(
     mut pending: ResMut<PendingShots>,
     mut commands: Commands,
-    mobs: Query<(Entity, &Mob, &MobState, &MobHistory)>,
+    mobs: Query<(Entity, &Mob, &MobState, &MobHistory, &Health)>,
     terrain: Res<TerrainRes>,
     tick: Res<SimTick>,
-    stats: Query<&Items>,
+    shooters: Query<(&Items, &Health), With<Player>>,
     mut damage: MessageWriter<DamageMob>,
     mut explode: MessageWriter<Explode>,
     mut fx: MessageWriter<ToClients<Fx>>,
@@ -161,18 +163,26 @@ fn resolve_shots(
     for p in pending.0.drain(..) {
         let shot = p.shot;
         let def = shot.weapon.def();
-        let player_stats = stats.get(p.shooter).map(|i| PlayerStats::from_inventory(&i.0)).ok();
+        let shooter = shooters.get(p.shooter).ok();
+        let player_stats = shooter.map(|(i, _)| PlayerStats::from_inventory(&i.0));
+        let own_health = shooter.map(|(_, h)| h.hp / h.max.max(1.0)).unwrap_or(1.0);
         let mut rng = Rng::new(shot.seed ^ 0x5EED_CAFE);
 
         // Projectile weapons spawn an entity instead.
-        if let Some(speed) = def.projectile_speed {
+        if let Some(projectile) = def.projectile {
+            let speed = def.projectile_speed;
+            let kind = match projectile {
+                ProjectileType::Rocket => ProjectileKind::Rocket,
+                ProjectileType::Grenade => ProjectileKind::Grenade,
+                ProjectileType::Plasma => ProjectileKind::Plasma,
+            };
             commands.spawn((
                 Replicated,
                 Projectile {
-                    kind: ProjectileKind::Rocket,
+                    kind,
                     origin: shot.origin + shot.dir * 0.8,
                     vel: shot.dir * speed,
-                    gravity: 0.0,
+                    gravity: def.projectile_gravity,
                     spawn_tick: tick.0,
                     owner_slot: p.slot,
                 },
@@ -181,7 +191,7 @@ fn resolve_shots(
                     splash: def.splash_radius,
                     by: Some(p.shooter),
                     hurts_players: false,
-                    ttl: def.range / speed,
+                    ttl: def.range / speed + 1.0,
                 },
             ));
             continue;
@@ -191,15 +201,34 @@ fn resolve_shots(
         let view_tick = p.view_tick.clamp(tick.0.saturating_sub(MAX_REWIND_TICKS), tick.0);
         let wall = terrain.raycast(shot.origin, shot.dir, def.range).unwrap_or(def.range);
         let mut best: Option<(Entity, f32)> = None;
-        for (entity, mob, state, history) in &mobs {
+        let mut pierced: Vec<(Entity, f32)> = Vec::new();
+        for (entity, mob, state, history, _) in &mobs {
             let pos = history.at(view_tick, state.pos);
             let (a, b, r) = mob_capsule(mob.kind, pos);
             if let Some(t) = ray_capsule(shot.origin, shot.dir, a, b, r)
                 && t < wall
-                && best.is_none_or(|(_, bt)| t < bt)
             {
-                best = Some((entity, t));
+                pierced.push((entity, t));
+                if best.is_none_or(|(_, bt)| t < bt) {
+                    best = Some((entity, t));
+                }
             }
+        }
+        // Railgun: every monster on the line takes the hit; the beam stops at the wall.
+        if def.pierce {
+            let end = shot.origin + shot.dir * wall;
+            let targets = match p.owner {
+                Some(id) => SendTargets::AllExcept(id),
+                None => SendTargets::All,
+            };
+            fx.write(ToClients { targets, message: Fx::Tracer { slot: p.slot, weapon: shot.weapon, from: shot.origin, to: end } });
+            for (target, t) in pierced {
+                let crit = player_stats.is_some_and(|s| rng.chance(s.crit_chance));
+                let crit_mult = if crit { player_stats.map(|s| s.crit_mult).unwrap_or(2.0) } else { 1.0 };
+                let pos = shot.origin + shot.dir * t;
+                damage.write(DamageMob { target, amount: shot.damage * crit_mult, crit, pos, by: Some(p.shooter) });
+            }
+            continue;
         }
 
         let end_dist = best.map(|(_, t)| t).unwrap_or(wall);
@@ -216,8 +245,27 @@ fn resolve_shots(
             // Damage falloff for shotgun pellets at long range.
             let falloff = if shot.weapon == WeaponKind::Shotgun { (1.0 - (t - 10.0).max(0.0) / 40.0).max(0.3) } else { 1.0 };
             let crit = player_stats.is_some_and(|s| rng.chance(s.crit_chance));
-            let amount = shot.damage * falloff * if crit { 2.0 } else { 1.0 };
+            let crit_mult = if crit { player_stats.map(|s| s.crit_mult).unwrap_or(2.0) } else { 1.0 };
+            let target_health = mobs.get(target).map(|(.., h)| h.hp / h.max.max(1.0)).unwrap_or(1.0);
+            let conditional = player_stats.map(|s| s.conditional_damage(own_health, target_health)).unwrap_or(1.0);
+            let amount = shot.damage * falloff * crit_mult * conditional;
             damage.write(DamageMob { target, amount, crit, pos: end, by: Some(p.shooter) });
+            // Tesla coil: an electric arc jumps to the 2 nearest other monsters.
+            if let Some(s) = player_stats
+                && rng.chance(s.tesla_chance)
+            {
+                let mut others: Vec<(Entity, Vec3)> = mobs
+                    .iter()
+                    .filter(|(e, ..)| *e != target)
+                    .map(|(e, m, st, ..)| (e, st.pos + Vec3::Y * m.kind.def().height * 0.5))
+                    .filter(|(_, pos)| pos.distance(end) < 9.0)
+                    .collect();
+                others.sort_by(|a, b| a.1.distance(end).total_cmp(&b.1.distance(end)));
+                for (e, pos) in others.into_iter().take(2) {
+                    damage.write(DamageMob { target: e, amount: shot.damage * 0.6, crit: false, pos, by: Some(p.shooter) });
+                    fx.write(ToClients { targets: SendTargets::All, message: Fx::Arc { from: end, to: pos } });
+                }
+            }
             if let Some(s) = player_stats
                 && rng.chance(s.explode_chance)
             {
@@ -261,7 +309,7 @@ fn update_projectiles(
 
         let radius = match proj.kind {
             ProjectileKind::BossOrb => 0.9,
-            ProjectileKind::Rocket => 0.4,
+            ProjectileKind::Rocket | ProjectileKind::Grenade => 0.4,
             _ => 0.35,
         };
         let mut direct: Option<Entity> = None;
@@ -304,7 +352,7 @@ fn update_projectiles(
             });
         } else if let Some(target) = direct {
             if data.hurts_players {
-                damage_player.write(DamagePlayer { target, amount: data.damage });
+                damage_player.write(DamagePlayer { target, amount: data.damage, attacker: None });
             } else {
                 damage_mob.write(DamageMob { target, amount: data.damage, crit: false, pos, by: data.by });
             }
@@ -346,7 +394,7 @@ fn apply_explosions(
                 }
                 let d = (state.sim.mv.pos + Vec3::Y * 0.9 - ex.pos).length();
                 if d < ex.radius {
-                    damage_player.write(DamagePlayer { target: entity, amount: ex.damage * scale(d) });
+                    damage_player.write(DamagePlayer { target: entity, amount: ex.damage * scale(d), attacker: None });
                 }
             }
         }
@@ -358,7 +406,7 @@ fn apply_mob_damage(
     mut hits: MessageReader<DamageMob>,
     mut commands: Commands,
     mut mobs: Query<(&Mob, &mut Health), Without<Player>>,
-    mut players: Query<(&Player, &mut Health, &mut Wallet, &Items, &mut PlayerScore), Without<Mob>>,
+    mut players: Query<(&Player, &mut Health, &mut Wallet, &Items, &mut PlayerScore, &mut PlayerState), Without<Mob>>,
     mut info: Single<&mut MatchInfo>,
     mut fx: MessageWriter<ToClients<Fx>>,
     mut events: MessageWriter<ToClients<GameEvent>>,
@@ -374,7 +422,7 @@ fn apply_mob_damage(
 
         let mut by_slot = 255;
         if let Some(by) = hit.by
-            && let Ok((player, mut ph, _, items, mut score)) = players.get_mut(by)
+            && let Ok((player, mut ph, _, items, mut score, mut state)) = players.get_mut(by)
         {
             by_slot = player.slot;
             score.damage += dealt;
@@ -385,6 +433,9 @@ fn apply_mob_damage(
             }
             if killed {
                 score.kills += 1;
+                if s.bloodlust > 0.0 {
+                    state.sim.mv.haste = state.sim.mv.haste.max(s.bloodlust);
+                }
             }
         }
         fx.write(ToClients {
@@ -395,7 +446,7 @@ fn apply_mob_damage(
         if killed {
             commands.entity(hit.target).try_despawn();
             // Every player gets paid (see economy.rs for why).
-            for (_, _, mut wallet, items, mut score) in &mut players {
+            for (_, _, mut wallet, items, mut score, _) in &mut players {
                 let s = PlayerStats::from_inventory(&items.0);
                 let gold = economy::kill_reward(mob.kind.def().gold, info.difficulty, s.gold_mult);
                 wallet.gold += gold;
@@ -412,22 +463,52 @@ fn apply_mob_damage(
 
 fn apply_player_damage(
     mut hits: MessageReader<DamagePlayer>,
-    mut players: Query<(&Player, &mut Health, &Items, &mut PlayerScore, &Owner)>,
+    mut players: Query<(&Player, &mut Health, &mut Items, &mut PlayerScore, &PlayerState, &mut HurtClock)>,
+    mut damage_mob: MessageWriter<DamageMob>,
     mut fx: MessageWriter<ToClients<Fx>>,
     mut events: MessageWriter<ToClients<GameEvent>>,
 ) {
     for hit in hits.read() {
-        let Ok((player, mut health, items, mut score, _)) = players.get_mut(hit.target) else { continue };
+        let Ok((player, mut health, mut items, mut score, state, mut clock)) = players.get_mut(hit.target) else { continue };
         if health.downed {
             continue;
         }
-        let amount = PlayerStats::from_inventory(&items.0).mitigate(hit.amount);
+        let stats = PlayerStats::from_inventory(&items.0);
+        // Phase step: untouchable while dashing.
+        if stats.dash_invulnerable && state.sim.mv.dash_timer > 0.0 {
+            continue;
+        }
+        clock.0 = 0.0;
+        let mut amount = stats.mitigate(hit.amount);
+        // Thorns: melee attackers take part of the damage back.
+        if let Some(attacker) = hit.attacker
+            && stats.thorns > 0.0
+        {
+            damage_mob.write(DamageMob {
+                target: attacker,
+                amount: hit.amount * stats.thorns,
+                crit: false,
+                pos: state.sim.mv.pos + Vec3::Y,
+                by: None,
+            });
+        }
+        // The energy shield absorbs first.
+        let absorbed = amount.min(health.shield);
+        health.shield -= absorbed;
+        amount -= absorbed;
         health.hp -= amount;
         fx.write(ToClients {
             targets: SendTargets::All,
-            message: Fx::PlayerHurt { slot: player.slot, amount: amount.round() as u16 },
+            message: Fx::PlayerHurt { slot: player.slot, amount: (amount + absorbed).round() as u16 },
         });
         if health.hp <= 0.0 {
+            // An Ankh saves you once.
+            if items.0.consume(crate::shared::items::ItemKind::Ankh) {
+                health.hp = health.max * 0.5;
+                info!("{} was saved by an Ankh", player.name);
+                events.write(ToClients { targets: SendTargets::All, message: GameEvent::AnkhUsed { slot: player.slot } });
+                continue;
+            }
             health.hp = 0.0;
             health.downed = true;
             health.revive = 0.0;

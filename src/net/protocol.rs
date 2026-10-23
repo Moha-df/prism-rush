@@ -89,12 +89,22 @@ pub struct Health {
     pub downed: bool,
     /// Revive progress in [0, 1].
     pub revive: f32,
+    /// Players only: energy shield absorbing damage before health.
+    pub shield: f32,
+    pub shield_max: f32,
 }
 
 impl Health {
     pub fn new(max: f32) -> Self {
-        Self { hp: max, max, downed: false, revive: 0.0 }
+        Self { hp: max, max, downed: false, revive: 0.0, shield: 0.0, shield_max: 0.0 }
     }
+}
+
+/// Cards offered by an opened chest, waiting for the player's choice.
+#[derive(Component, Clone, Debug, Serialize, Deserialize)]
+pub struct PendingChoice {
+    pub chest: ChestKind,
+    pub options: Vec<ItemKind>,
 }
 
 #[derive(Component, Clone, Copy, Debug, Default, Serialize, Deserialize)]
@@ -151,6 +161,16 @@ pub enum ProjectileKind {
     Acid,
     Bolt,
     BossOrb,
+    Grenade,
+    Plasma,
+}
+
+/// A weapon lying on the ground (from a weapon crate, or dropped by a
+/// player taking another one). Press E to take it.
+#[derive(Component, Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct WeaponPickup {
+    pub kind: WeaponKind,
+    pub pos: Vec3,
 }
 
 /// Ballistic projectile: replicated once, clients compute its trajectory.
@@ -193,6 +213,12 @@ pub struct InputBatch {
     pub view_tick: u32,
 }
 
+/// Client -> server: pick one of the offered cards.
+#[derive(Message, Clone, Debug, Serialize, Deserialize)]
+pub struct ChooseCard {
+    pub index: u8,
+}
+
 /// Client -> server lobby actions (only the host's are accepted).
 #[derive(Message, Clone, Debug, Serialize, Deserialize)]
 pub enum LobbyCommand {
@@ -225,12 +251,18 @@ pub enum Fx {
     Gold { amount: u32 },
     /// A straggler monster was brought back near the players.
     Warp { from: Vec3, to: Vec3 },
+    /// Electric arc between two points (Tesla coil).
+    Arc { from: Vec3, to: Vec3 },
 }
 
 /// Server -> clients: important events (reliable).
 #[derive(Message, Clone, Debug, Serialize, Deserialize)]
 pub enum GameEvent {
-    ChestOpened { pos: Vec3, slot: u8, reward: Reward },
+    ChestOpened { pos: Vec3, slot: u8, kind: ChestKind },
+    /// A player got an item (card picked) or a weapon.
+    Gained { slot: u8, reward: Reward },
+    /// An Ankh saved a player.
+    AnkhUsed { slot: u8 },
     Downed { slot: u8 },
     Revived { slot: u8 },
     BossSpawned,
@@ -269,14 +301,17 @@ pub fn register_protocol(app: &mut App) {
         .replicate::<Health>()
         .replicate::<Wallet>()
         .replicate::<Items>()
+        .replicate::<PendingChoice>()
         .replicate_once::<Mob>()
         .replicate::<MobState>()
         .replicate_once::<Chest>()
         .replicate::<ChestOpen>()
         .replicate_once::<Projectile>()
+        .replicate_once::<WeaponPickup>()
         .add_client_message::<Hello>(Channel::Ordered)
         .add_client_message::<InputBatch>(Channel::Unreliable)
         .add_client_message::<LobbyCommand>(Channel::Ordered)
+        .add_client_message::<ChooseCard>(Channel::Ordered)
         .add_server_message::<Welcome>(Channel::Ordered)
         .add_server_message::<Fx>(Channel::Unreliable)
         .add_server_message::<GameEvent>(Channel::Ordered);
@@ -342,14 +377,16 @@ mod tests {
 
     #[test]
     fn events_roundtrip() {
-        let ev = GameEvent::ChestOpened { pos: Vec3::ONE, slot: 2, reward: Reward::Item(ItemKind::Feather) };
+        let ev = GameEvent::Gained { slot: 2, reward: Reward::Item(ItemKind::FrogLegs) };
         match roundtrip(&ev) {
-            GameEvent::ChestOpened { slot, reward, .. } => {
+            GameEvent::Gained { slot, reward } => {
                 assert_eq!(slot, 2);
-                assert_eq!(reward, Reward::Item(ItemKind::Feather));
+                assert_eq!(reward, Reward::Item(ItemKind::FrogLegs));
             }
             _ => panic!("wrong variant"),
         }
+        let choice = PendingChoice { chest: ChestKind::Large, options: vec![ItemKind::Ankh, ItemKind::Crown, ItemKind::Clover] };
+        assert_eq!(roundtrip(&choice).options, choice.options);
         let summary = GameEvent::GameOver(Box::new(RunSummary {
             duration: 300.0,
             level: 5,

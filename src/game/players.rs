@@ -64,6 +64,13 @@ pub struct PlayerScore {
     pub downs: u32,
 }
 
+/// Seconds since the player was last hurt (energy shield recharge delay).
+#[derive(Component, Default, Debug)]
+pub struct HurtClock(pub f32);
+
+/// Shield starts recharging after this many seconds without damage.
+pub const SHIELD_DELAY: f32 = 4.0;
+
 /// A shot fired this tick, waiting to be resolved by the combat systems.
 pub struct PendingShot {
     pub shooter: Entity,
@@ -151,9 +158,24 @@ fn simulate_players(
     }
 }
 
-fn regenerate(mut players: Query<(&mut Health, &Items)>) {
-    for (mut health, items) in &mut players {
+fn regenerate(
+    mut players: Query<(&mut Health, &Items, &mut HurtClock)>,
+    mut director: ResMut<super::mobs::Director>,
+) {
+    let wave_cleared = std::mem::take(&mut director.just_cleared);
+    for (mut health, items, mut clock) in &mut players {
         let stats = PlayerStats::from_inventory(&items.0);
+        clock.0 += DT;
+        // Energy shield.
+        health.shield_max = stats.shield_max;
+        if clock.0 > SHIELD_DELAY {
+            health.shield = (health.shield + 25.0 * DT).min(health.shield_max);
+        }
+        health.shield = health.shield.min(health.shield_max);
+        // Medkit: heal at the end of each wave.
+        if wave_cleared && !health.downed && stats.wave_heal > 0.0 {
+            health.hp = (health.hp + health.max * stats.wave_heal).min(stats.max_hp);
+        }
         // Max HP can change when picking a Vital Heart: keep the ratio sane.
         if health.max != stats.max_hp {
             let gained = (stats.max_hp - health.max).max(0.0);

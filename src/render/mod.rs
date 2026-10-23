@@ -6,6 +6,7 @@ pub mod avatars;
 pub mod camera;
 pub mod debug;
 pub mod fx;
+pub mod icons;
 pub mod model;
 pub mod models;
 pub mod palette;
@@ -51,6 +52,7 @@ impl Plugin for RenderPlugin {
                 fx::FxPlugin,
                 audio::SfxPlugin,
                 debug::DebugPlugin,
+                icons::IconsPlugin,
             ));
     }
 }

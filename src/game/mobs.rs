@@ -28,11 +28,13 @@ pub struct Director {
     pub clearing_time: f32,
     pub rng: Rng,
     pub spawned: u32,
+    /// Set when a wave is cleared (consumed by the Medkit healing).
+    pub just_cleared: bool,
 }
 
 impl Default for Director {
     fn default() -> Self {
-        Self { budget: 0.0, spawn_timer: 2.0, boss_pending: false, clearing_time: 0.0, rng: Rng::new(0xD1EC), spawned: 0 }
+        Self { budget: 0.0, spawn_timer: 2.0, boss_pending: false, clearing_time: 0.0, rng: Rng::new(0xD1EC), spawned: 0, just_cleared: false }
     }
 }
 
@@ -155,6 +157,7 @@ fn director(
                     // --- Wave cleared!
                     info.wave_phase = WavePhase::Break;
                     info.wave_timer = economy::WAVE_BREAK;
+                    dir.just_cleared = true;
                     info!("wave {wave} cleared");
                     events.write(ToClients { targets: SendTargets::All, message: GameEvent::WaveCleared { wave } });
                 }
@@ -315,7 +318,7 @@ fn mob_ai(
                     match mob.kind {
                         MobKind::Skitter => {
                             if to.length() < def.attack_range * 1.5 {
-                                damage.write(DamagePlayer { target: target_entity, amount: damage_amount });
+                                damage.write(DamagePlayer { target: target_entity, amount: damage_amount, attacker: Some(entity) });
                             }
                         }
                         MobKind::Brute => {

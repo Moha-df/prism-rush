@@ -16,8 +16,40 @@ pub struct DebugPlugin;
 impl Plugin for DebugPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, auto_screenshots.run_if(|c: Res<AppConfig>| c.shots.is_some()))
+            .add_systems(Update, demo_scene.run_if(|c: Res<AppConfig>| c.shots.is_some()))
             .add_systems(Update, diag_mobs.run_if(|c: Res<AppConfig>| c.autopilot));
     }
+}
+
+/// For screenshots: gives the host player a few items, drops a weapon in
+/// front of them and opens a card choice, so every UI element is visible.
+fn demo_scene(
+    mut commands: Commands,
+    time: Res<Time<Real>>,
+    mut done: Local<bool>,
+    role: Res<crate::net::NetRole>,
+    mut players: Query<(Entity, &crate::net::protocol::Player, &crate::net::protocol::PlayerState, &mut crate::net::protocol::Items)>,
+) {
+    use crate::net::protocol::{PendingChoice, WeaponPickup};
+    use crate::shared::economy::ChestKind;
+    use crate::shared::items::ItemKind;
+    if *done || time.elapsed_secs() < 12.0 || !role.is_authority() {
+        return;
+    }
+    let Some((entity, _, state, mut items)) = players.iter_mut().find(|(_, p, ..)| p.slot == 0) else { return };
+    *done = true;
+    for item in [ItemKind::FrogLegs, ItemKind::FrogLegs, ItemKind::Jetpack, ItemKind::VampireFangs, ItemKind::Crown, ItemKind::TeslaCoil] {
+        items.0.add(item);
+    }
+    let forward = Vec3::new(-state.yaw.sin(), 0.0, -state.yaw.cos());
+    commands.spawn((
+        bevy_replicon::prelude::Replicated,
+        WeaponPickup { kind: crate::shared::weapons::WeaponKind::Railgun, pos: state.sim.mv.pos + forward * 3.0 + Vec3::Y * 0.9 },
+    ));
+    commands.entity(entity).insert(PendingChoice {
+        chest: ChestKind::Large,
+        options: vec![ItemKind::DragonHeart, ItemKind::FrogLegs, ItemKind::EnergyShield, ItemKind::GatlingSoul],
+    });
 }
 
 fn auto_screenshots(
