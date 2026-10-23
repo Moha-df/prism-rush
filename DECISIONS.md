@@ -83,6 +83,36 @@ Exemples utilisés : `first_person_view_model`, `fog`, `generate_custom_mesh`, `
   gagne des crédits et les dépense pour faire apparaître des monstres ; boss toutes les 5 minutes.
 - Les monstres **télégraphient** leurs attaques (temps de préparation) : lisible et esquivable.
 
+## Direction artistique et rendu
+
+- Recherches faites avant de modéliser (guides low-poly, silhouettes, palettes) :
+  silhouette lisible d'abord (test de la silhouette noire), **palette stricte** (`render/palette.rs`),
+  **flat shading** avec une densité de facettes constante, lumière directionnelle chaude + ambiance
+  froide, brouillard teinté, accents **émissifs** (yeux, visières) pour la lisibilité.
+- Monde chaud et naturel (verts, grès, roches lavande) / monstres prune sombre avec accents lumineux
+  (magenta, orange, vert toxique, cyan) / joueurs saturés avec visière lumineuse de leur couleur.
+- **Un seul système de modèles** (`render/model.rs`) : une description en arbre de `Part`
+  (primitive, taille, position, rotation, couleur, lueur, tag d'animation), utilisée de deux façons :
+  instanciée en hiérarchie animable (personnages, coffres, armes) ou **cuite** dans un seul maillage
+  à couleurs de sommets (décor des chunks : 3 draw calls par chunk quel que soit le contenu).
+- Animations 100 % procédurales (`render/anim.rs`) : une fonction pure `pose(tag, état, temps)`.
+- Arme en vue FPS rendue par une 2e caméra (calque 1) : elle ne traverse jamais les murs.
+- Sons synthétisés au démarrage (oscillateurs, bruit filtré, enveloppes) via une source audio Bevy
+  personnalisée (`render/audio.rs`), sans aucun fichier.
+- Vérification visuelle automatique : `--autopilot` (le bot pilote le joueur) + `--shots` (captures).
+
+## Jeu en ligne sans ouvrir de port
+
+- **Tailscale** (VPN maillé gratuit) plutôt que :
+  - playit.gg : l'UDP semblait réservé à l'offre payante, avec des retours de fiabilité mitigés ;
+  - Steam Networking : demande Steam et un AppID ;
+  - WebRTC : demande un serveur de signalisation, et échoue derrière certains NAT.
+- Tailscale traverse les NAT, avec repli sur relais, et le jeu le voit comme un réseau local.
+- Le salon affiche automatiquement l'IP Tailscale (`tailscale ip -4`) et l'IP locale.
+- Partage de machine (« Share ») plutôt qu'invitation dans tout le réseau : l'ami ne voit que ce PC.
+- Le serveur écoute sur `0.0.0.0` (toutes les interfaces). QUIC (quinnet) chiffre la connexion,
+  avec un certificat auto-signé et une vérification ignorée côté client (acceptable entre amis).
+
 ## Vérification sans jouer
 
 - `cargo test` : ~50 tests (déterminisme du monde, mouvement, armes, objets, économie,
@@ -100,3 +130,15 @@ Exemples utilisés : `first_person_view_model`, `fog`, `generate_custom_mesh`, `
   `bevy_replicon_quinnet` l'utilise → `default-features = false`.
 - Les tests de génération ont révélé que les escaliers de ruines pouvaient déborder sur la zone de
   spawn : filtrage final dans `generate_chunk`.
+- **Bug du « mauvais monstre qui meurt »** : le test rayon/capsule faisait 0/0 = NaN pour les
+  petits monstres (capsule réduite à une sphère), et `NaN > r²` est faux → chaque tir « touchait »
+  un Trotteur au hasard sur la carte. Trouvé en journalisant les kills (impact à 10–45 m du monstre
+  tué). Leçon Rust/maths : toujours traiter les cas dégénérés, et tester `is_finite()`.
+- **Fermetures du jeu** : par défaut Bevy *panique* quand une commande vise une entité déjà
+  détruite (fréquent en réseau). Gestionnaire d'erreurs réglé sur `warn`, `try_despawn`/`try_insert`,
+  et tous les logs écrits dans `logs/prism_rush.log` (+ `crash.log` en cas de panique).
+- Les scripts `.bat` recompilent à chaque lancement (incrémental) : sinon on relance un vieil exe.
+- `system_font_discovery` nécessaire pour la police système (accents français) ;
+  `system_clipboard` pour coller l'IP avec Ctrl+V.
+- Le bot fonçait vers des coffres perchés inaccessibles : il ignore les coffres trop hauts,
+  abandonne après 8 s, et combat en priorité si un monstre est proche.

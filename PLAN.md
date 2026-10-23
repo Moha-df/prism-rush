@@ -10,14 +10,14 @@ Stack : **Bevy 0.20** · **bevy_replicon 0.45** (réplication) · **bevy_replico
 
 | # | Contenu | Statut |
 |---|---------|--------|
-| J1 | Joueur FPS sur terrain simple : sprint, saut, dash, glissade, air-control | ⏳ |
-| J2 | Multijoueur local (2 instances) + lobby (héberger / rejoindre / lancer) | ⏳ |
-| J3 | Tir hitscan, mobs, argent | ⏳ |
-| J4 | Coffres d'objets et d'armes, 15 bonus, 6 armes, scaling prix & difficulté | ⏳ |
-| J5 | Map infinie par chunks (seed partagée, déterministe) | ⏳ |
-| J6 | Modèles procéduraux (joueurs, 5+ monstres, armes, coffres, décor), animations, juice | ⏳ |
-| J7 | Jeu en ligne sans ouverture de port (Tailscale) + guide README + scripts .bat | ⏳ |
-| J8 | Polish, équilibrage, menus, écran de fin, bots, mode headless | ⏳ |
+| J1 | Joueur FPS sur terrain simple : sprint, saut, dash, glissade, air-control | ✅ |
+| J2 | Multijoueur local (2 instances) + lobby (héberger / rejoindre / lancer) | ✅ |
+| J3 | Tir hitscan, mobs, argent | ✅ |
+| J4 | Coffres d'objets et d'armes, 15 bonus, 6 armes, scaling prix & difficulté | ✅ |
+| J5 | Map infinie par chunks (seed partagée, déterministe) | ✅ |
+| J6 | Modèles procéduraux (joueurs, 5+ monstres, armes, coffres, décor), animations, juice | ✅ |
+| J7 | Jeu en ligne sans ouverture de port (Tailscale) + guide README + scripts .bat | ✅ |
+| J8 | Polish, équilibrage, menus, écran de fin, bots, mode headless | 🟡 menus, écran de fin, bots, headless faits ; équilibrage et éclairage à affiner |
 
 ## Vérification sans jouer
 
@@ -40,3 +40,10 @@ src/
   render/            modèles procéduraux, terrain, caméra, viewmodel, animations, FX, audio
   ui/                menu, lobby, HUD, écran de fin
 ```
+
+## Reste à faire / idées
+
+- Équilibrage fin (difficulté des premières minutes, prix, dégâts des armes) après des parties à plusieurs.
+- Éclairage : ombres encore un peu sombres sous les plateformes, réglage de la lumière ambiante.
+- Tableau de fin de partie aligné (police à chasse fixe).
+- Possible : prédiction des roquettes côté client, plus de types de chunks, sons spatialisés.

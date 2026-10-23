@@ -297,7 +297,7 @@ impl WorldGen {
                     let g = self.ground_height(p.x, p.y);
                     chunk.solids.push(Solid {
                         center: Vec3::new(p.x, g + half.y * 0.7, p.y),
-                        shape: Shape::Box { half, yaw: rng.range(0.0, 3.14) },
+                        shape: Shape::Box { half, yaw: rng.range(0.0, std::f32::consts::PI) },
                         kind: SolidKind::Rock,
                     });
                 }
@@ -342,7 +342,7 @@ impl WorldGen {
                     let g = self.ground_height(p.x, p.y);
                     chunk.solids.push(Solid {
                         center: Vec3::new(p.x, g + half.y - 0.3, p.y),
-                        shape: Shape::Box { half, yaw: rng.range(0.0, 3.14) },
+                        shape: Shape::Box { half, yaw: rng.range(0.0, std::f32::consts::PI) },
                         kind: SolidKind::Ruin,
                     });
                 }
@@ -362,7 +362,7 @@ impl WorldGen {
                         pos: Vec3::new(p.x, g + h, p.y),
                         kind: DecorKind::Canopy,
                         scale: rng.range(1.6, 2.6),
-                        yaw: rng.range(0.0, 6.28),
+                        yaw: rng.range(0.0, std::f32::consts::TAU),
                         variant: rng.next_f32(),
                     });
                 }
@@ -451,7 +451,7 @@ impl WorldGen {
                 pos: Vec3::new(p.x, self.ground_height(p.x, p.y), p.y),
                 kind,
                 scale: rng.range(0.6, 1.4),
-                yaw: rng.range(0.0, 6.28),
+                yaw: rng.range(0.0, std::f32::consts::TAU),
                 variant: rng.next_f32(),
             });
         }

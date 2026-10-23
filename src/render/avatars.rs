@@ -143,11 +143,11 @@ pub fn update_anim_states(
         let stride = st.stride.max(0.3);
         st.phase += dt * st.speed / stride * 1.6;
 
-        if let Some(m) = mob {
-            if m.anim != st.action {
-                st.action = m.anim;
-                st.action_time = 0.0;
-            }
+        if let Some(m) = mob
+            && m.anim != st.action
+        {
+            st.action = m.anim;
+            st.action_time = 0.0;
         }
         st.action_time += dt;
 

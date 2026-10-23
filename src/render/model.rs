@@ -205,7 +205,7 @@ fn mesh_to_tris(mesh: &Mesh) -> Tris {
         Some(Indices::U32(v)) => v.iter().map(|&i| i as usize).collect(),
         None => (0..pos.len()).collect(),
     };
-    indices.chunks_exact(3).map(|t| [p(t[0]), p(t[1]), p(t[2])]).collect()
+    indices.as_chunks::<3>().0.iter().map(|t| [p(t[0]), p(t[1]), p(t[2])]).collect()
 }
 
 /// Unit-sized triangles for each primitive. Low resolution on purpose.
