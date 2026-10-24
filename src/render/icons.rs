@@ -387,7 +387,6 @@ pub fn paint_item(item: ItemKind) -> Canvas {
     const COPPER: Rgba = rgb(0.85, 0.42, 0.14);
     const WOOD: Rgba = rgb(0.58, 0.33, 0.13);
     const LEAF: Rgba = rgb(0.45, 0.85, 0.2);
-    const PAPER: Rgba = rgb(0.96, 0.88, 0.95);
     const GLASS: Rgba = [0.35, 0.8, 1.0, 0.45];
     let mut c = Canvas::default();
     match item {

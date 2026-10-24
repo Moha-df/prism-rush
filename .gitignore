@@ -8,3 +8,6 @@ logs/
 
 # Visual studio output (prism_rush studio ...)
 studio_out/
+
+# Worktrees of helper agents
+.claude/worktrees/
