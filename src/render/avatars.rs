@@ -16,6 +16,10 @@ pub struct HasModel {
     pub model: Entity,
 }
 
+/// Short squash when a monster is hit.
+#[derive(Component)]
+pub struct HitPop(pub f32);
+
 /// Everything animations need to know about an entity.
 #[derive(Component, Debug, Default)]
 pub struct AnimState {
@@ -47,7 +51,7 @@ impl Plugin for AvatarsPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (attach_models, detach_player_models, place_chests, update_anim_states, grow_shockwaves, dim_used_statues).chain(),
+            (attach_models, detach_player_models, place_chests, update_anim_states, grow_shockwaves, dim_used_statues, hit_pop).chain(),
         );
     }
 }
@@ -67,6 +71,24 @@ fn grow_shockwaves(
         let radius = (age * SHOCKWAVE_SPEED).max(0.1);
         if let Ok(mut t) = models.get_mut(has.model) {
             t.scale = Vec3::new(radius, 1.0, radius);
+        }
+    }
+}
+
+fn hit_pop(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut q: Query<(Entity, &mut HitPop, &HasModel)>,
+    mut models: Query<&mut Transform, Without<HasModel>>,
+) {
+    for (e, mut pop, has) in &mut q {
+        pop.0 -= time.delta_secs();
+        let k = (pop.0 / 0.12).max(0.0);
+        if let Ok(mut t) = models.get_mut(has.model) {
+            t.scale = Vec3::new(1.0 + 0.18 * k, 1.0 - 0.12 * k, 1.0 + 0.18 * k);
+        }
+        if pop.0 <= 0.0 {
+            commands.entity(e).remove::<HitPop>();
         }
     }
 }

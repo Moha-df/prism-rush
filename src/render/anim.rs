@@ -91,6 +91,11 @@ pub fn pose(tag: AnimTag, rest: &Transform, st: &AnimState, t: f32) -> Transform
         AnimTag::Recoil => {
             out.translation.z += st.recoil * 0.07;
         }
+        AnimTag::Beam => {
+            let k = (1.0 - st.open * 1.5).max(0.0);
+            let pulse = 1.0 + (t * 3.0).sin() * 0.15;
+            out.scale = Vec3::new(k * pulse, k, k * pulse);
+        }
     }
     out
 }

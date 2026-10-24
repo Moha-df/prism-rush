@@ -9,6 +9,8 @@ use std::f32::consts::FRAC_PI_2;
 use bevy::camera::visibility::RenderLayers;
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll};
+use bevy::anti_alias::smaa::Smaa;
+use bevy::pbr::{ScreenSpaceAmbientOcclusion, ScreenSpaceAmbientOcclusionQualityLevel};
 use bevy::post_process::bloom::Bloom;
 use bevy::prelude::*;
 use bevy::camera::Hdr;
@@ -70,6 +72,12 @@ fn spawn_cameras(mut commands: Commands, config: Res<AppConfig>) {
             Hdr,
             Tonemapping::TonyMcMapface,
             Bloom { intensity: 0.12, ..Bloom::NATURAL },
+            // Ambient occlusion darkens creases and contact points: adds a lot
+            // of depth to flat-shaded low poly. It requires MSAA off, so SMAA
+            // (a post-process) smooths the edges instead.
+            Msaa::Off,
+            ScreenSpaceAmbientOcclusion { quality_level: ScreenSpaceAmbientOcclusionQualityLevel::Medium, ..default() },
+            Smaa::default(),
             Projection::from(PerspectiveProjection { fov: config.fov.to_radians(), near: 0.05, ..default() }),
             DistanceFog {
                 color: palette::FOG,
@@ -83,6 +91,7 @@ fn spawn_cameras(mut commands: Commands, config: Res<AppConfig>) {
             ViewModelCamera,
             Camera3d::default(),
             Camera { order: 1, clear_color: ClearColorConfig::None, ..default() },
+            Msaa::Off,
             Hdr,
             Tonemapping::TonyMcMapface,
             Projection::from(PerspectiveProjection { fov: 62f32.to_radians(), near: 0.02, ..default() }),

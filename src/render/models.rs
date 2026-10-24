@@ -485,7 +485,25 @@ fn colossus() -> Part {
 // Chests
 // ---------------------------------------------------------------------------
 
+/// Vertical light beam showing valuable chests from far away.
+fn beam(color: Color) -> Part {
+    Part::pivot()
+        .tag(AnimTag::Beam)
+        .with(Part::cylinder(0.22, 26.0).at(0.0, 13.5, 0.0).color(color).glow(2.5))
+        .with(Part::cylinder(0.5, 26.0).at(0.0, 13.5, 0.0).color(color).glow(0.6))
+}
+
 pub fn chest(kind: ChestKind) -> Part {
+    let base = chest_body(kind);
+    match kind {
+        ChestKind::Small => base,
+        ChestKind::Large => base.with(beam(GLOW_ORANGE)),
+        ChestKind::Legendary => base.with(beam(GLOW_MAGENTA)),
+        ChestKind::Weapon => base.with(beam(TEAL_GLOW)),
+    }
+}
+
+fn chest_body(kind: ChestKind) -> Part {
     match kind {
         ChestKind::Small => {
             let lid = Part::pivot()

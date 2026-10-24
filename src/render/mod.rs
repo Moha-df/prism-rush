@@ -1,6 +1,7 @@
 //! Everything visual and audible. Only added when the game has a window.
 
 pub mod anim;
+pub mod atmosphere;
 pub mod audio;
 pub mod avatars;
 pub mod camera;
@@ -32,7 +33,7 @@ pub const VIEWMODEL_LAYER: usize = 1;
 
 /// The sky dome follows the camera.
 #[derive(Component)]
-struct SkyDome;
+pub struct SkyDome;
 
 pub struct RenderPlugin;
 
@@ -53,6 +54,7 @@ impl Plugin for RenderPlugin {
                 audio::SfxPlugin,
                 debug::DebugPlugin,
                 icons::IconsPlugin,
+                atmosphere::AtmospherePlugin,
             ));
     }
 }
@@ -119,7 +121,7 @@ fn setup_sky(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>, mut mater
         })),
         Transform::from_translation(sun_dir * 800.0),
         NotShadowCaster,
-        SkyDome,
+        atmosphere::SunDisc,
     ));
 }
 

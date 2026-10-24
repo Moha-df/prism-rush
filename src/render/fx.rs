@@ -11,7 +11,7 @@ use super::palette;
 use super::MainCamera;
 use crate::game::world::TerrainRes;
 use crate::net::client::{InputState, PredictedEvents, Prediction};
-use crate::net::protocol::{player_color, Fx, GameEvent, MobState, Mob};
+use crate::net::protocol::{player_color, Fx, GameEvent, Mob, MobState};
 use crate::net::LocalPlayer;
 use crate::shared::mobs::MobKind;
 use crate::shared::rng::Rng;
@@ -195,12 +195,22 @@ fn on_server_fx(
     mut feedback: ResMut<HudFeedback>,
     local: Res<LocalPlayer>,
     camera: Query<&GlobalTransform, With<MainCamera>>,
+    mobs: Query<(Entity, &Transform), With<Mob>>,
 ) {
     let cam = camera.single().map(|c| c.translation()).unwrap_or_default();
     let rng = &mut rng.0;
     for fx in fx_in.read() {
         match fx {
             Fx::Hit { pos, amount, crit, killed, by_slot } => {
+                // Squash the monster that was hit (the closest one to the impact).
+                if let Some((e, _)) = mobs
+                    .iter()
+                    .map(|(e, t)| (e, t.translation.distance(*pos)))
+                    .filter(|(_, d)| *d < 4.0)
+                    .min_by(|a, b| a.1.total_cmp(&b.1))
+                {
+                    commands.entity(e).try_insert(super::avatars::HitPop(0.12));
+                }
                 let color = if *crit { palette::GOLD } else { Color::srgb(1.0, 0.9, 0.7) };
                 burst(&mut commands, &mut cache, &mut meshes, &mut materials, rng, *pos, 5, color, 5.0, 6.0, 0.07, 0.25, 9.0);
                 damage_number(&mut commands, *pos, *amount, *crit, rng);
@@ -355,6 +365,8 @@ fn on_predicted_events(
         let w = &ev.weapons;
         if let Some(kind) = w.fired {
             sfx.write(PlaySfx { volume: 0.8, ..PlaySfx::ui(Sfx::Shot(kind)) });
+            let dir = pred.last_input.aim_dir();
+            flash_light(&mut commands, pred.sim.eye() + dir * 1.0, Color::srgb(1.0, 0.75, 0.4), 120_000.0, 8.0, 0.05);
         }
         // Tracers start at the (approximate) muzzle on screen.
         let fwd = Quat::from_euler(EulerRot::YXZ, input.yaw, input.pitch, 0.0);

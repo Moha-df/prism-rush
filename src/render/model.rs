@@ -62,6 +62,8 @@ pub enum AnimTag {
     Pulse,
     /// Weapon parts moving on fire (slide, pump).
     Recoil,
+    /// Light beam above a chest, shrinks away once opened.
+    Beam,
 }
 
 #[derive(Clone, Debug)]
