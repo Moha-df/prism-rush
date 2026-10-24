@@ -52,6 +52,38 @@ src/
 | V2.5 | Ambiance jour/nuit par vague, nuages, SSAO + SMAA, faisceaux de coffres, impacts, flash de bouche | ✅ |
 | V2.6 | Bots (cartes, armes), tests, docs, release, push | ✅ |
 
+## V3 — « Prism Bonk » : la boucle de Megabonk, mais c'est toi qui vises
+
+Recherche : boucle de Megabonk (XP → niveaux → choix d'armes/tomes avec raretés ×1 à ×2,
+4 armes + 4 tomes, coffres payants de plus en plus chers, sanctuaires, jarres, chrono, boss,
+Essaim final de fantômes qui accélèrent sans fin, monnaie méta « silver » pour débloquer).
+On garde **le même monde procédural, le même moteur et le même netcode**.
+
+### Différences voulues avec Megabonk
+- **Deux catégories d'armes, séparées** :
+  - **Arme principale** (1 seule, tenue en main) : **tu vises et tu tires**. Elle est choisie
+    au salon parmi celles débloquées. Ses améliorations portent sur les projectiles : nombre,
+    vitesse, taille, rebonds, dégâts, cadence, critique.
+  - **Armes automatiques** (jusqu'à 3) : aura, foudre du ciel, orbes, haches, mines, tornades,
+    fiole de poison, traînée de feu. Elles agissent seules.
+- **Pas de fin** : une seule carte infinie, pas de boss final. La difficulté monte jusqu'à
+  devenir impossible : **fantômes blancs** à 15 min, **fantômes noirs** à 20 min, puis plus
+  rapides, plus résistants et plus forts chaque minute.
+- **Coop 1-4** : l'XP est commune à l'équipe (tout le monde monte de niveau ensemble), mais chacun
+  fait ses choix.
+
+### Jalons
+| # | Contenu |
+|---|---------|
+| V3.1 | Boucle temps réel : chrono continu à la place des vagues, gemmes d'XP (aimant), niveaux d'équipe, or au sol, HUD (chrono, niveau, barre d'XP) |
+| V3.2 | Armes principales visées (bâton de feu, arc, revolver, fusil à pompe, sniper, bâton de foudre, bananarang, épée) à projectiles, sans munitions ; visuels prédits côté client ; choix de l'arme de départ au salon |
+| V3.3 | Armes automatiques (aura, foudre, orbes, haches, mines, tornade, poison, traînée de feu) simulées par le serveur |
+| V3.4 | Montée de niveau : 3 choix (nouvelle arme auto, amélioration d'arme avec 1-2 stats selon la rareté, nouveau tome, tome +1), 5 raretés, 16 tomes, 3 armes auto + 4 tomes max |
+| V3.5 | Monde : coffres = objet aléatoire, prix qui monte à chaque achat ; jarres ; sanctuaires (charge, avidité, défi, aimant) ; bonus au sol (soin, aimant, bombe, rage) |
+| V3.6 | Difficulté continue, élites, boss à 4/8/12 min, Essaim final (fantômes blancs puis noirs, croissance exponentielle) |
+| V3.7 | Méta-progression : silver gagné à chaque partie, boutique au menu (armes principales et armes auto à débloquer), profil sauvegardé |
+| V3.8 | Bots, tests, docs, release, push |
+
 ## Reste à faire / idées
 
 - Équilibrage fin après des parties à plusieurs (vagues tardives, prix, armes légendaires).
