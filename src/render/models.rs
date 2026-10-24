@@ -910,53 +910,237 @@ fn tint(c: Color, v: f32) -> Color {
     Color::srgb(s.red * f, s.green * f, s.blue * f)
 }
 
-/// Model for a collision object. Visual parts stay inside the collision volume.
+/// Mixes a color toward white (crystal tips, sunlit leaves).
+fn lift(c: Color, t: f32) -> Color {
+    let s = c.to_srgba();
+    Color::srgb(s.red + (1.0 - s.red) * t, s.green + (1.0 - s.green) * t, s.blue + (1.0 - s.blue) * t)
+}
+
+/// Cheap deterministic pseudo-random value in [0, 1) from a prop variant and a salt:
+/// gives every prop its own small differences from the single `variant` number.
+fn vary(v: f32, salt: f32) -> f32 {
+    let x = (v * 91.7 + salt * 17.13).sin() * 43_758.547;
+    x - x.floor()
+}
+
+/// One crystal: an octagonal column with a pointed, brighter tip. Base at the origin, along +Y.
+fn crystal_spike(d: f32, h: f32, color: Color, glow: f32) -> Part {
+    Part::pivot()
+        .with(Part::cylinder(d, h * 0.7).at(0.0, h * 0.35, 0.0).color(color).glow(glow))
+        .with(Part::cone(d, h * 0.3).at(0.0, h * 0.85, 0.0).color(lift(color, 0.45)).glow(glow * 1.5))
+}
+
+/// Round leafy crown: a big core and puffs around it (darker below, sunlit on top).
+fn round_crown(base: Part, s: f32, c: Color, v: f32) -> Part {
+    let dark = tint(c, 0.0);
+    let light = lift(c, 0.18);
+    let k = 0.85 + vary(v, 4.0) * 0.3;
+    base.with(Part::cylinder(0.3 * s, 1.0 * s).at(0.0, 0.2 * s, 0.0).color(BARK))
+        .with(Part::ico(2.3 * s, 1.6 * s * k, 2.3 * s).at(0.0, 0.8 * s, 0.0).rot_y(18.0).color(c))
+        .with(Part::ico(1.5 * s, 1.2 * s, 1.5 * s).at(0.8 * s, 1.05 * s, 0.35 * s).rot_y(40.0).color(tint(c, 0.7)))
+        .with(Part::ico(1.4 * s, 1.1 * s, 1.4 * s).at(-0.75 * s, 0.95 * s, -0.4 * s).rot_z(15.0).color(tint(c, 0.4)))
+        .with(Part::ico(1.3 * s, 1.0 * s, 1.3 * s).at(-0.2 * s, 0.5 * s, 0.85 * s).rot_x(20.0).color(dark))
+        .with(Part::ico(1.4 * s, 1.0 * s, 1.4 * s).at(0.1 * s, 1.5 * s * k, -0.1 * s).rot_y(70.0).color(light))
+}
+
+/// Model for a collision object. Visual parts stay inside the collision volume
+/// (small rubble, roots and drapes may poke out a little at the foot).
 pub fn solid(s: &Solid, variant: f32) -> Part {
+    let r = |salt: f32| vary(variant, salt);
     match (s.kind, s.shape) {
-        (SolidKind::Rock, Shape::Box { half, yaw }) => Part::pivot()
-            .at_v(s.center)
-            .rot_y(yaw.to_degrees())
-            // Icosahedrons read as boulders much better than boxes.
-            .with(Part::ico(half.x * 2.3, half.y * 2.3, half.z * 2.3).color(tint(ROCK, variant)))
-            .with(
-                Part::ico(half.x * 1.4, half.y * 1.3, half.z * 1.4)
-                    .at(half.x * 0.35, half.y * 0.45, -half.z * 0.2)
-                    .rot_y(40.0)
-                    .color(tint(ROCK_DARK, variant)),
-            )
-            .with(Part::ico(half.x * 1.0, half.y * 0.9, half.z * 1.0).at(-half.x * 0.45, half.y * 0.3, half.z * 0.4).rot_z(20.0).color(tint(ROCK, 1.0 - variant))),
-        (SolidKind::Ruin, Shape::Box { half, yaw }) => Part::pivot()
-            .at_v(s.center)
-            .rot_y(yaw.to_degrees())
-            .with(Part::cube(half.x * 2.0, half.y * 2.0, half.z * 2.0).color(tint(SANDSTONE, variant)))
-            .with(Part::cube(half.x * 0.8, 0.35, half.z * 2.3).at(-half.x * 0.5, half.y + 0.17, 0.0).color(SANDSTONE_DARK))
-            .with(Part::cube(half.x * 0.6, 0.3, half.z * 2.1).at(half.x * 0.3, half.y + 0.15, 0.0).rot_y(5.0).color(SANDSTONE))
-            .with(Part::cube(half.x * 2.05, 0.15, half.z * 2.2).at(0.0, -half.y * 0.3, 0.0).color(SANDSTONE_DARK)),
-        (SolidKind::Platform, Shape::Box { half, yaw }) => Part::pivot()
-            .at_v(s.center)
-            .rot_y(yaw.to_degrees())
-            .with(Part::cube(half.x * 2.0, half.y * 2.0, half.z * 2.0).color(SANDSTONE))
-            .with(Part::cube(half.x * 2.02, 0.08, half.z * 2.02).at(0.0, half.y - 0.04, 0.0).color(tint(LEAF_B, variant)))
-            .with(Part::frustum(half.x.min(half.z) * 1.6, 0.9).at(0.0, -half.y - 0.45, 0.0).rot_x(180.0).color(SANDSTONE_DARK))
-            .with(Part::ico(0.3, 0.7, 0.3).at(half.x * 0.5, -half.y - 0.5, half.z * 0.3).color(if variant > 0.5 { CRYSTAL_CYAN } else { CRYSTAL_PINK }).glow(2.0))
-            .with(Part::ico(0.25, 0.55, 0.25).at(-half.x * 0.4, -half.y - 0.4, -half.z * 0.4).color(CRYSTAL_CYAN).glow(2.0)),
-        (SolidKind::Pillar, Shape::Cylinder { radius, half_height }) => Part::pivot()
-            .at_v(s.center)
-            .with(Part::cylinder(radius * 2.0, half_height * 2.0).color(tint(SANDSTONE, variant)))
-            .with(Part::cylinder(radius * 2.5, 0.3).at(0.0, half_height - 0.15, 0.0).color(SANDSTONE_DARK))
-            .with(Part::cylinder(radius * 2.4, 0.35).at(0.0, -half_height + 0.17, 0.0).color(SANDSTONE_DARK))
-            .with(Part::torus(radius * 2.15, 0.12).at(0.0, 0.0, 0.0).color(SANDSTONE_DARK)),
-        (SolidKind::TreeTrunk, Shape::Cylinder { radius, half_height }) => Part::pivot()
-            .at_v(s.center)
-            .with(Part::cylinder(radius * 2.0, half_height * 2.0).color(BARK))
-            .with(Part::cone(radius * 2.6, 0.7).at(0.0, -half_height + 0.3, 0.0).color(BARK)),
-        (SolidKind::Crystal, Shape::Cylinder { radius, half_height }) => {
-            let color = if variant > 0.5 { CRYSTAL_CYAN } else { CRYSTAL_PINK };
-            Part::pivot()
+        // Rock: a chunky faceted cluster with a dark stratum, moss on top and pebbles
+        // at the foot. The ground is at y = -0.7 * half.y (the generator buries 30%).
+        (SolidKind::Rock, Shape::Box { half, yaw }) => {
+            let (hx, hy, hz) = (half.x, half.y, half.z);
+            let ground = -0.7 * hy;
+            let rock = Part::pivot()
                 .at_v(s.center)
-                .with(Part::ico(radius * 2.0, half_height * 2.0, radius * 2.0).color(color).glow(1.4))
-                .with(Part::ico(radius, half_height, radius).at(radius * 0.8, -half_height * 0.5, 0.0).rot_z(-25.0).color(color).glow(1.4))
-                .with(Part::ico(radius * 1.6, 0.5, radius * 1.6).at(0.0, -half_height * 0.9, 0.0).color(ROCK_DARK))
+                .rot_y(yaw.to_degrees())
+                .with(Part::ico(hx * 2.2, hy * 2.15, hz * 2.2).rot_y(r(1.0) * 72.0).rot_z(6.0 - r(2.0) * 12.0).color(tint(ROCK, variant)))
+                // Stratum: a darker flattened layer cutting through the boulder.
+                .with(Part::ico(hx * 2.35, hy * 0.6, hz * 2.3).at(0.0, -hy * 0.1, 0.0).rot_y(36.0).color(tint(ROCK_DARK, variant)))
+                // Shoulder block leaning on one side, and a smaller boulder at the foot.
+                .with(Part::ico(hx * 1.3, hy * 1.45, hz * 1.3).at(hx * 0.45, hy * 0.2, -hz * 0.3).rot_y(40.0).rot_x(14.0).color(tint(ROCK, 1.0 - variant)))
+                .with(Part::ico(hx * 0.95, hy * 0.85, hz * 0.95).at(-hx * 0.55, ground + hy * 0.3, hz * 0.5).rot_z(22.0).color(tint(ROCK_DARK, 1.0 - variant)))
+                .with(Part::ico(0.55, 0.32, 0.45).at(hx * 1.0, ground + 0.08, hz * 0.55).rot_y(30.0).color(tint(ROCK, variant)))
+                .with(Part::ico(0.38, 0.24, 0.34).at(-hx * 0.2, ground + 0.06, -hz * 1.05).color(tint(ROCK_DARK, variant)));
+            if variant < 0.7 {
+                // Moss cap on the top facets.
+                rock.with(Part::ico(hx * 1.6, hy * 0.45, hz * 1.5).at(-hx * 0.1, hy * 0.88, hz * 0.05).rot_y(r(3.0) * 72.0).color(tint(LEAF_A, variant)))
+                    .with(Part::ico(hx * 0.7, hy * 0.3, hz * 0.7).at(hx * 0.5, hy * 0.85, -hz * 0.3).color(tint(LEAF_B, variant)))
+            } else {
+                rock
+            }
+        }
+        // Broken wall: plinth, coursed body, a jagged crown of blocks (within 15% of
+        // the full height), an arched window, ivy and fallen stones.
+        (SolidKind::Ruin, Shape::Box { half, yaw }) => {
+            let (hx, hy, hz) = (half.x, half.y, half.z);
+            let joint = -hy + hy * 1.2;
+            let mut wall = Part::pivot()
+                .at_v(s.center)
+                .rot_y(yaw.to_degrees())
+                .with(Part::cube(hx * 2.0 + 0.3, 0.75, hz * 2.0 + 0.3).at(0.0, -hy + 0.37, 0.0).color(SANDSTONE_DARK))
+                .with(Part::cube(hx * 2.0, hy * 1.2, hz * 2.0).at(0.0, -hy + hy * 0.6, 0.0).color(tint(SANDSTONE, variant)))
+                // Courses: thin dark grooves around the wall.
+                .with(Part::cube(hx * 2.0 + 0.04, 0.07, hz * 2.0 + 0.04).at(0.0, -hy + hy * 0.62, 0.0).color(SANDSTONE_DARK))
+                .with(Part::cube(hx * 2.0 + 0.04, 0.09, hz * 2.0 + 0.04).at(0.0, joint, 0.0).color(SANDSTONE_DARK));
+            // Crown: 4 blocks of uneven height, the tallest reaching the collision top.
+            let tallest = (r(5.0) * 4.0) as usize % 4;
+            let w = hx * 2.0 / 4.0;
+            for i in 0..4 {
+                let f = if i == tallest { 1.0 } else { 0.85 + r(6.0 + i as f32) * 0.13 };
+                let top = -hy + hy * 2.0 * f;
+                let x = -hx + w * (i as f32 + 0.5);
+                let h = top - joint;
+                let c = tint(SANDSTONE, r(10.0 + i as f32));
+                wall = wall.with(Part::cube(w * 0.97, h, hz * 2.0 * 0.97).at(x, joint + h * 0.5, 0.0).color(c));
+                // A capstone knocked askew on some blocks.
+                if r(14.0 + i as f32) > 0.5 {
+                    wall = wall.with(Part::cube(w * 0.8, 0.22, hz * 2.2).at(x, top - 0.1, 0.0).rot_y(r(18.0 + i as f32) * 12.0 - 6.0).color(SANDSTONE_DARK));
+                }
+            }
+            if hx > 1.9 && hy > 1.5 {
+                // Arched window: a dark recess through the wall.
+                let wx = hx * (r(22.0) - 0.5) * 0.6;
+                let wy = -hy * 0.15;
+                wall = wall
+                    .with(Part::cube(0.8, 1.0, hz * 2.0 + 0.04).at(wx, wy, 0.0).color(STONE_DARK))
+                    .with(Part::cylinder(0.8, hz * 2.0 + 0.04).at(wx, wy + 0.5, 0.0).rot_x(90.0).color(STONE_DARK))
+                    .with(Part::cube(1.1, 0.16, hz * 2.0 + 0.16).at(wx, wy - 0.55, 0.0).color(SANDSTONE_DARK));
+            }
+            // Ivy hanging from the top on both faces.
+            for (i, side) in [1.0f32, -1.0].into_iter().enumerate() {
+                let x = hx * (r(30.0 + i as f32) * 1.4 - 0.7);
+                let len = hy * (0.5 + r(32.0 + i as f32) * 0.6);
+                wall = wall
+                    .with(Part::cube(0.5, len, 0.06).at(x, hy * 0.65 - len * 0.5, side * (hz + 0.03)).color(tint(LEAF_A, r(34.0))))
+                    .with(Part::cube(0.35, len * 0.6, 0.06).at(x + 0.35, hy * 0.65 - len * 0.3, side * (hz + 0.03)).color(tint(LEAF_B, r(35.0))));
+            }
+            // Moss on top and fallen stones at the foot.
+            wall.with(Part::cube(w * 1.5, 0.1, hz * 2.05).at(hx * 0.3, hy * 2.0 * 0.85 - hy + 0.02, 0.0).color(tint(LEAF_A, variant)))
+                .with(Part::cube(0.7, 0.5, 0.6).at(hx * 0.6, -hy + 0.3, hz + 0.6).rot_y(25.0).rot_z(12.0).color(tint(SANDSTONE, 0.3)))
+                .with(Part::cube(0.5, 0.35, 0.45).at(hx * 0.2, -hy + 0.25, hz + 0.9).rot_y(-30.0).color(SANDSTONE_DARK))
+                .with(Part::cube(0.6, 0.4, 0.5).at(-hx * 0.7, -hy + 0.27, -hz - 0.5).rot_y(60.0).rot_x(10.0).color(tint(SANDSTONE, 0.8)))
+        }
+        // Floating slab: grassy top with drapes over the edges, a stone rim, and a
+        // rocky floating-island underside with hanging crystals and roots.
+        (SolidKind::Platform, Shape::Box { half, yaw }) => {
+            let (hx, hy, hz) = (half.x, half.y, half.z);
+            let m = hx.min(hz);
+            let cr = if variant > 0.5 { CRYSTAL_CYAN } else { CRYSTAL_PINK };
+            let grass = tint(LEAF_B, variant);
+            let mut slab = Part::pivot()
+                .at_v(s.center)
+                .rot_y(yaw.to_degrees())
+                .with(Part::cube(hx * 2.0, hy * 2.0, hz * 2.0).color(SANDSTONE))
+                .with(Part::cube(hx * 2.0 + 0.04, 0.12, hz * 2.0 + 0.04).at(0.0, hy - 0.06, 0.0).color(grass))
+                .with(Part::cube(hx * 2.0 + 0.16, hy * 0.6, hz * 2.0 + 0.16).at(0.0, -hy * 0.7, 0.0).color(SANDSTONE_DARK))
+                // Floating-island underside.
+                .with(Part::frustum(m * 1.8, 0.8).at(0.0, -hy - 0.4, 0.0).rot_x(180.0).rot_y(22.0).color(ROCK))
+                .with(Part::cone(m * 1.0, 1.3).at(m * 0.15, -hy - 1.3, -m * 0.1).rot_x(180.0).color(ROCK_DARK))
+                .with(Part::ico(m * 0.8, 0.8, m * 0.7).at(-m * 0.45, -hy - 0.55, m * 0.3).color(ROCK_DARK))
+                .with(crystal_spike(0.28, 0.8, cr, 2.0).at(m * 0.45, -hy - 0.3, m * 0.25).rot_x(180.0).rot_z(15.0))
+                .with(crystal_spike(0.22, 0.6, CRYSTAL_CYAN, 2.0).at(-m * 0.4, -hy - 0.3, -m * 0.35).rot_x(170.0))
+                // Hanging roots.
+                .with(Part::cube(0.07, 1.1, 0.07).at(hx * 0.7, -hy - 0.5, -hz * 0.5).color(LEAF_A))
+                .with(Part::cube(0.07, 0.8, 0.07).at(-hx * 0.75, -hy - 0.35, hz * 0.6).color(LEAF_A));
+            // Grass drapes over the edges (inverted triangles).
+            for i in 0..8 {
+                let t = r(40.0 + i as f32) * 1.6 - 0.8;
+                let len = 0.3 + r(48.0 + i as f32) * 0.35;
+                let c = tint(grass, r(56.0 + i as f32));
+                let (x, z, face) = match i % 4 {
+                    0 => (hx + 0.03, t * hz, 90.0),
+                    1 => (-hx - 0.03, t * hz, 90.0),
+                    2 => (t * hx, hz + 0.03, 0.0),
+                    _ => (t * hx, -hz - 0.03, 0.0),
+                };
+                slab = slab.with(Part::prism(0.55, len, 0.06).at(x, hy - len * 0.5 + 0.02, z).rot_y(face).rot_z(180.0).color(c));
+            }
+            slab
+        }
+        // Ancient column: stepped plinth, fluted shaft in drums, echinus and abacus,
+        // moss at the foot; the tall tower pillars carry a faint glowing rune band.
+        (SolidKind::Pillar, Shape::Cylinder { radius, half_height }) => {
+            let (rd, hh) = (radius, half_height);
+            let body = tint(SANDSTONE, variant);
+            let mut col = Part::pivot()
+                .at_v(s.center)
+                .with(Part::cube(rd * 3.0, 0.5, rd * 3.0).at(0.0, -hh + 0.25, 0.0).color(SANDSTONE_DARK))
+                .with(Part::cube(rd * 2.6, 0.35, rd * 2.6).at(0.0, -hh + 0.67, 0.0).rot_y(45.0).color(tint(SANDSTONE_DARK, 0.8)))
+                .with(Part::cylinder(rd * 2.35, 0.25).at(0.0, -hh + 0.97, 0.0).color(SANDSTONE_DARK))
+                .with(Part::cylinder(rd * 2.0, hh * 2.0).rot_y(22.5).color(body))
+                // Capital.
+                .with(Part::frustum(rd * 3.0, 0.45).at(0.0, hh - 0.55, 0.0).rot_x(180.0).color(SANDSTONE_DARK))
+                .with(Part::cube(rd * 2.9, 0.33, rd * 2.9).at(0.0, hh - 0.165, 0.0).color(tint(SANDSTONE, 1.0 - variant)))
+                // Moss on the plinth.
+                .with(Part::ico(rd * 1.4, 0.3, rd * 1.1).at(rd * 0.9, -hh + 0.5, rd * 0.7).color(LEAF_A))
+                .with(Part::ico(rd * 0.8, 0.22, rd * 0.9).at(-rd * 0.8, -hh + 0.88, -rd * 0.6).color(LEAF_B));
+            // Flutes: dark vertical strips on the shaft faces.
+            let fl = hh * 2.0 - 2.0;
+            if fl > 0.5 {
+                for a in [0.0f32, 45.0, 90.0, 135.0] {
+                    col = col.with(Part::cube(0.1, fl, rd * 2.0).at(0.0, 0.2, 0.0).rot_y(a).color(SANDSTONE_DARK));
+                }
+            }
+            // Drum joints every ~2.4 units, a few with chipped (darker) stones.
+            let drums = ((hh * 2.0 - 1.6) / 2.4) as i32;
+            for i in 1..=drums.min(4) {
+                let y = -hh + 1.1 + i as f32 * 2.4;
+                col = col.with(Part::cylinder(rd * 2.08, 0.1).at(0.0, y, 0.0).rot_y(22.5).color(SANDSTONE_DARK));
+            }
+            if rd >= 0.9 {
+                col = col.with(Part::cylinder(rd * 2.06, 0.14).at(0.0, hh * 0.45, 0.0).rot_y(22.5).color(TEAL_GLOW).glow(1.2));
+            }
+            col
+        }
+        // Tree trunk: root flare, three roots, a branch stub and a bracket fungus.
+        (SolidKind::TreeTrunk, Shape::Cylinder { radius, half_height }) => {
+            let (rd, hh) = (radius, half_height);
+            let a = r(60.0) * 120.0;
+            let mut trunk = Part::pivot()
+                .at_v(s.center)
+                .with(Part::cylinder(rd * 2.0, hh * 2.0).rot_y(a).color(BARK))
+                .with(Part::frustum(rd * 3.4, 0.7).at(0.0, -hh + 0.35, 0.0).rot_y(a + 22.5).color(BARK))
+                .with(Part::cube(rd * 0.35, hh * 1.2, rd * 2.05).at(0.0, -hh * 0.1, 0.0).rot_y(a + 30.0).color(WOOD_DARK))
+                .with(Part::cylinder(rd * 0.6, rd * 2.6).at(rd * 1.3, hh * 0.35, 0.0).rot_z(-55.0).color(BARK))
+                .with(Part::cylinder(rd * 1.1, 0.07).at(-rd * 0.95, -hh * 0.25, rd * 0.2).color(BONE))
+                .with(Part::cylinder(rd * 0.75, 0.06).at(-rd * 0.85, -hh * 0.25 + 0.22, rd * 0.35).color(BONE));
+            for i in 0..3 {
+                let yaw = a + i as f32 * 120.0 + 40.0;
+                trunk = trunk.with(
+                    Part::pivot()
+                        .at(0.0, -hh, 0.0)
+                        .rot_y(yaw)
+                        .with(Part::cube(rd * 0.7, rd * 0.6, rd * 2.4).at(0.0, 0.1, rd * 1.4).rot_x(18.0).color(tint(BARK, 0.2))),
+                );
+            }
+            trunk
+        }
+        // Crystal cluster: a tall main spike, tilted satellites and a dark rock base.
+        // The ground is at y = -0.8 * half_height (the generator buries the base).
+        (SolidKind::Crystal, Shape::Cylinder { radius, half_height }) => {
+            let (rd, hh) = (radius, half_height);
+            let color = if variant > 0.5 { CRYSTAL_CYAN } else { CRYSTAL_PINK };
+            let other = if variant > 0.5 { CRYSTAL_PINK } else { CRYSTAL_CYAN };
+            let ground = -0.8 * hh;
+            let mut cl = Part::pivot()
+                .at_v(s.center)
+                .with(crystal_spike(rd * 1.5, hh * 1.95, color, 1.4).at(0.0, -hh, 0.0).rot_y(r(70.0) * 45.0).rot_z(4.0));
+            let sats = [(0.75, 0.55, 28.0, 0.0), (0.6, 0.45, 32.0, 130.0), (0.5, 0.32, 40.0, 230.0), (0.45, 0.25, 50.0, 300.0)];
+            for (i, (dk, hk, tilt, yaw)) in sats.into_iter().enumerate() {
+                let c = if i == 2 { other } else { color };
+                cl = cl.with(
+                    Part::pivot()
+                        .at(0.0, ground, 0.0)
+                        .rot_y(yaw + r(71.0 + i as f32) * 30.0)
+                        .with(crystal_spike(rd * dk, hh * 2.0 * hk, c, 1.4).at(rd * 0.35, -0.2, 0.0).rot_z(-tilt)),
+                );
+            }
+            cl.with(Part::ico(rd * 2.6, hh * 0.45, rd * 2.4).at(0.0, ground, 0.0).rot_y(20.0).color(ROCK_DARK))
+                .with(Part::ico(rd * 1.2, hh * 0.3, rd * 1.0).at(rd * 1.0, ground + 0.05, -rd * 0.6).color(ROCK))
+                .with(Part::ico(rd * 0.8, hh * 0.2, rd * 0.9).at(-rd * 1.1, ground, rd * 0.4).color(ROCK))
         }
         // Fallback (shape/kind combos not produced by the generator).
         (_, Shape::Box { half, yaw }) => Part::cube(half.x * 2.0, half.y * 2.0, half.z * 2.0)
@@ -967,14 +1151,27 @@ pub fn solid(s: &Solid, variant: f32) -> Part {
     }
 }
 
+/// Jump pad: a stone drum with a metal plate, a glowing ring, four rim pylons and a
+/// stacked up-arrow (stays flat enough to run across).
 pub fn jump_pad(pos: Vec3, radius: f32) -> Part {
     let d = radius * 2.0;
-    Part::pivot()
+    let mut pad = Part::pivot()
         .at_v(pos)
-        .with(Part::cylinder(d + 0.4, 0.25).at(0.0, 0.05, 0.0).color(METAL_DARK))
-        .with(Part::torus(d, 0.18).at(0.0, 0.2, 0.0).color(TEAL_GLOW).glow(3.0))
-        .with(Part::cylinder(d * 0.6, 0.06).at(0.0, 0.2, 0.0).color(TEAL_GLOW).glow(2.0))
-        .with(Part::cone(0.35, 0.4).at(0.0, 0.45, 0.0).color(TEAL_GLOW).glow(3.0))
+        .with(Part::cylinder(d + 0.7, 0.3).at(0.0, 0.05, 0.0).rot_y(22.5).color(STONE))
+        .with(Part::cylinder(d + 0.25, 0.12).at(0.0, 0.24, 0.0).color(METAL_DARK))
+        .with(Part::torus(d, 0.18).at(0.0, 0.3, 0.0).color(TEAL_GLOW).glow(3.0))
+        .with(Part::cylinder(d * 0.62, 0.06).at(0.0, 0.3, 0.0).color(METAL_LIGHT))
+        .with(Part::cylinder(d * 0.45, 0.08).at(0.0, 0.32, 0.0).color(TEAL_GLOW).glow(2.0))
+        .with(Part::cone(0.6, 0.3).at(0.0, 0.55, 0.0).color(TEAL_GLOW).glow(3.0))
+        .with(Part::cone(0.42, 0.24).at(0.0, 0.85, 0.0).color(TEAL_GLOW).glow(3.5));
+    for i in 0..4 {
+        let a = (i as f32 * 90.0 + 45.0).to_radians();
+        let rr = d * 0.5 + 0.22;
+        pad = pad
+            .with(Part::cube(0.26, 0.4, 0.26).at(a.cos() * rr, 0.3, a.sin() * rr).rot_y(-(i as f32) * 90.0 - 45.0).color(METAL_LIGHT))
+            .with(Part::cube(0.14, 0.08, 0.14).at(a.cos() * rr, 0.54, a.sin() * rr).color(TEAL_GLOW).glow(2.5));
+    }
+    pad
 }
 
 pub fn decor(d: &Decor) -> Part {
@@ -983,42 +1180,109 @@ pub fn decor(d: &Decor) -> Part {
     let s = d.scale;
     match d.kind {
         DecorKind::Grass => {
+            // A tuft of flat blades fanning out, a seed stalk on some.
             let c = if v > 0.5 { LEAF_B } else { LEAF_A };
-            base.with(Part::cone(0.12 * s, 0.5 * s).at(0.0, 0.25 * s, 0.0).color(c))
-                .with(Part::cone(0.1 * s, 0.4 * s).at(0.1 * s, 0.2 * s, 0.05).rot_z(-15.0).color(tint(c, 0.8)))
-                .with(Part::cone(0.1 * s, 0.35 * s).at(-0.08 * s, 0.17 * s, -0.04).rot_z(18.0).color(tint(c, 0.2)))
+            let mut tuft = base;
+            for (i, shade) in [0.6, 0.2, 1.0, 0.4, 0.8].into_iter().enumerate() {
+                let h = (0.32 + vary(v, i as f32) * 0.25) * s;
+                let lean = if i == 0 { 0.0 } else { 14.0 + vary(v, 9.0 + i as f32) * 14.0 };
+                tuft = tuft.with(
+                    Part::pivot()
+                        .rot_y(i as f32 * 72.0 + 20.0)
+                        .with(Part::prism(0.12 * s, h, 0.04 * s).at(0.0, h * 0.5, 0.0).rot_z(lean).color(tint(c, shade))),
+                );
+            }
+            if vary(v, 20.0) > 0.6 {
+                tuft = tuft
+                    .with(Part::cube(0.025 * s, 0.6 * s, 0.025 * s).at(0.03 * s, 0.3 * s, 0.0).rot_z(-6.0).color(tint(LEAF_B, 0.9)))
+                    .with(Part::ico(0.07 * s, 0.14 * s, 0.07 * s).at(0.06 * s, 0.62 * s, 0.0).color(BONE));
+            }
+            tuft
         }
         DecorKind::Flower => {
             let petals = [rgb(1.0, 0.55, 0.7), rgb(1.0, 0.85, 0.35), rgb(0.95, 0.95, 1.0), rgb(0.7, 0.55, 1.0)];
             let c = petals[(v * 4.0) as usize % 4];
-            base.with(Part::cylinder(0.03, 0.4 * s).at(0.0, 0.2 * s, 0.0).color(LEAF_A))
-                .with(Part::ico(0.16 * s, 0.1 * s, 0.16 * s).at(0.0, 0.42 * s, 0.0).color(c))
-                .with(Part::ico(0.06 * s, 0.06 * s, 0.06 * s).at(0.0, 0.46 * s, 0.0).color(GOLD))
+            let bloom = |sz: f32| {
+                let mut b = Part::pivot().with(Part::ico(0.08 * sz, 0.06 * sz, 0.08 * sz).at(0.0, 0.02 * sz, 0.0).color(GOLD));
+                for i in 0..5 {
+                    let a = (i as f32 * 72.0).to_radians();
+                    b = b.with(
+                        Part::ico(0.1 * sz, 0.035 * sz, 0.065 * sz)
+                            .at(a.cos() * 0.07 * sz, 0.0, a.sin() * 0.07 * sz)
+                            .rot_y(-(i as f32) * 72.0)
+                            .rot_z(12.0)
+                            .color(if i % 2 == 0 { c } else { tint(c, 0.3) }),
+                    );
+                }
+                b
+            };
+            let mut f = base
+                .with(Part::cube(0.03 * s, 0.42 * s, 0.03 * s).at(0.0, 0.21 * s, 0.0).color(LEAF_A))
+                .with(Part::prism(0.1 * s, 0.22 * s, 0.03 * s).at(0.06 * s, 0.1 * s, 0.0).rot_z(-30.0).color(LEAF_B))
+                .with(Part::prism(0.1 * s, 0.18 * s, 0.03 * s).at(-0.05 * s, 0.08 * s, 0.02 * s).rot_y(70.0).rot_z(28.0).color(tint(LEAF_A, 0.7)))
+                .with(bloom(s).at(0.0, 0.43 * s, 0.0).rot_x(10.0));
+            if vary(v, 3.0) > 0.35 {
+                // A smaller second bloom on a shorter stem.
+                f = f
+                    .with(Part::cube(0.025 * s, 0.28 * s, 0.025 * s).at(0.09 * s, 0.13 * s, 0.05 * s).rot_z(-14.0).color(LEAF_A))
+                    .with(bloom(0.7 * s).at(0.13 * s, 0.28 * s, 0.05 * s).rot_z(-14.0));
+            }
+            f
         }
-        DecorKind::Pebble => base.with(Part::ico(0.35 * s, 0.18 * s, 0.28 * s).at(0.0, 0.05, 0.0).color(tint(ROCK, v))),
+        DecorKind::Pebble => base
+            .with(Part::ico(0.35 * s, 0.18 * s, 0.28 * s).at(0.0, 0.05, 0.0).rot_z(8.0).color(tint(ROCK, v)))
+            .with(Part::ico(0.18 * s, 0.11 * s, 0.16 * s).at(0.22 * s, 0.03, 0.1 * s).rot_y(40.0).color(tint(ROCK_DARK, v))),
         DecorKind::Mushroom => {
-            let cap = if v > 0.6 { GLOW_CYAN } else { rgb(0.86, 0.3, 0.25) };
-            let glow = if v > 0.6 { 1.5 } else { 0.0 };
-            base.with(Part::cylinder(0.1 * s, 0.25 * s).at(0.0, 0.12 * s, 0.0).color(BONE))
-                .with(Part::ellipsoid(0.36 * s, 0.2 * s, 0.36 * s).at(0.0, 0.27 * s, 0.0).color(cap).glow(glow))
+            // Red spotted caps, or glowing cyan ones; a smaller sibling next to it.
+            let glowing = v > 0.6;
+            let cap = if glowing { GLOW_CYAN } else { rgb(0.86, 0.3, 0.25) };
+            let glow = if glowing { 1.5 } else { 0.0 };
+            let mut m = base
+                .with(Part::cylinder(0.1 * s, 0.26 * s).at(0.0, 0.13 * s, 0.0).color(BONE))
+                .with(Part::cylinder(0.3 * s, 0.03 * s).at(0.0, 0.25 * s, 0.0).color(tint(BONE, 0.0)))
+                .with(Part::ellipsoid(0.38 * s, 0.2 * s, 0.38 * s).at(0.0, 0.29 * s, 0.0).color(cap).glow(glow))
+                .with(Part::cylinder(0.06 * s, 0.13 * s).at(0.14 * s, 0.065 * s, 0.06 * s).rot_z(-10.0).color(BONE))
+                .with(Part::ellipsoid(0.18 * s, 0.1 * s, 0.18 * s).at(0.155 * s, 0.14 * s, 0.06 * s).rot_z(-10.0).color(cap).glow(glow));
+            if !glowing {
+                for (x, z) in [(0.08, 0.04), (-0.06, 0.08), (0.0, -0.1)] {
+                    m = m.with(Part::ico(0.06 * s, 0.03 * s, 0.06 * s).at(x * s, 0.375 * s, z * s).color(BONE));
+                }
+            }
+            m
         }
         DecorKind::Shard => {
             let c = if v > 0.5 { CRYSTAL_CYAN } else { CRYSTAL_PINK };
-            base.with(Part::ico(0.18 * s, 0.6 * s, 0.18 * s).at(0.0, 0.25 * s, 0.0).rot_z(12.0).color(c).glow(1.8))
+            base.with(crystal_spike(0.15 * s, 0.6 * s, c, 1.8).at(0.0, -0.05, 0.0).rot_z(10.0))
+                .with(crystal_spike(0.1 * s, 0.35 * s, c, 1.8).at(0.08 * s, -0.03, 0.04 * s).rot_x(-14.0).rot_z(-32.0))
+                .with(Part::ico(0.3 * s, 0.12 * s, 0.26 * s).at(0.0, 0.02, 0.0).color(ROCK_DARK))
         }
         DecorKind::Canopy => {
-            if v < 0.55 {
-                // Pine: stacked cones.
-                let c = if v < 0.25 { LEAF_A } else { tint(LEAF_A, 0.3) };
-                base.with(Part::cone(2.2 * s, 1.6 * s).at(0.0, 0.3 * s, 0.0).color(c))
-                    .with(Part::cone(1.7 * s, 1.4 * s).at(0.0, 1.1 * s, 0.0).color(tint(c, 0.7)))
-                    .with(Part::cone(1.1 * s, 1.2 * s).at(0.0, 1.8 * s, 0.0).color(tint(c, 1.0)))
+            if v < 0.45 {
+                // Pine: four staggered tiers, darker skirt, lighter top.
+                let c = if v < 0.22 { LEAF_A } else { tint(LEAF_A, 0.3) };
+                let k = 0.9 + vary(v, 1.0) * 0.25;
+                base.with(Part::cylinder(0.25 * s, 0.8 * s).at(0.0, -0.1 * s, 0.0).color(BARK))
+                    .with(Part::cone(2.5 * s, 1.3 * s * k).at(0.0, 0.15 * s, 0.0).color(tint(c, 0.0)))
+                    .with(Part::cone(2.0 * s, 1.2 * s * k).at(0.0, 0.75 * s * k, 0.0).rot_y(22.5).color(tint(c, 0.6)))
+                    .with(Part::cone(1.5 * s, 1.1 * s * k).at(0.0, 1.3 * s * k, 0.0).color(tint(c, 0.9)))
+                    .with(Part::cone(0.95 * s, 1.0 * s * k).at(0.0, 1.85 * s * k, 0.0).rot_y(22.5).color(lift(c, 0.12)))
+            } else if v < 0.72 {
+                // Round broadleaf, sometimes with red fruit.
+                let crown = round_crown(base, s, LEAF_B, v);
+                if v > 0.62 {
+                    let fruit = rgb(0.9, 0.28, 0.22);
+                    crown
+                        .with(Part::ico(0.16 * s, 0.16 * s, 0.16 * s).at(1.0 * s, 0.5 * s, 0.6 * s).color(fruit))
+                        .with(Part::ico(0.16 * s, 0.16 * s, 0.16 * s).at(-0.9 * s, 0.6 * s, 0.5 * s).color(fruit))
+                        .with(Part::ico(0.16 * s, 0.16 * s, 0.16 * s).at(0.3 * s, 0.4 * s, -1.0 * s).color(fruit))
+                } else {
+                    crown
+                }
+            } else if v < 0.86 {
+                // Blossom tree.
+                round_crown(base, s, rgb(0.98, 0.68, 0.8), v)
             } else {
-                // Round tree, sometimes autumn colored.
-                let c = if v > 0.85 { LEAF_AUTUMN } else { LEAF_B };
-                base.with(Part::ico(2.2 * s, 1.8 * s, 2.2 * s).at(0.0, 0.6 * s, 0.0).color(c))
-                    .with(Part::ico(1.4 * s, 1.2 * s, 1.4 * s).at(0.6 * s, 1.2 * s, 0.3 * s).color(tint(c, 0.8)))
-                    .with(Part::ico(1.2 * s, 1.0 * s, 1.2 * s).at(-0.6 * s, 0.9 * s, -0.4 * s).color(tint(c, 0.2)))
+                round_crown(base, s, LEAF_AUTUMN, v)
             }
         }
     }
