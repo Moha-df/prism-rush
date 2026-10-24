@@ -11,31 +11,56 @@ use crate::net::client::Prediction;
 use crate::net::protocol::*;
 use crate::net::{LocalPlayer, NetCommand};
 use crate::render::fx::HudFeedback;
+use crate::render::palette::{GLOW_CYAN, GLOW_MAGENTA, GOLD};
 use crate::render::MainCamera;
 use crate::shared::economy;
 use crate::shared::items::{ItemKind, PlayerStats};
 use crate::shared::build::{auto_params, main_params, owned_tomes, tome_points, Offer};
 
+/// Every HUD text rewritten by a system, by role (one query serves them all).
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+enum HudText {
+    Hp,
+    Gold,
+    Timer,
+    Map,
+    Swarm,
+    Mobs,
+    Alive,
+    Totems,
+    Level,
+    Weapon,
+    WeaponLevel,
+    Ammo,
+    Slots,
+    Jumps,
+}
+
+/// The layers of the health bar.
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+enum HpPart {
+    Fill,
+    /// Pale bar that lags behind the fill after a hit (shows the damage taken).
+    Trail,
+    Shield,
+}
+
 #[derive(Component)]
-struct HpFill;
+struct HpFrame;
+#[derive(Component)]
+struct GoldRow;
+#[derive(Component)]
+struct TotemChip;
 #[derive(Component)]
 struct XpFill;
 #[derive(Component)]
-struct HpText;
-#[derive(Component)]
-struct GoldText;
-#[derive(Component)]
-struct RunText;
-#[derive(Component)]
-struct WeaponText;
-#[derive(Component)]
-struct AmmoText;
+struct LevelBadge;
 #[derive(Component)]
 struct ReloadFill;
 #[derive(Component)]
-struct SlotsText;
+struct SlotsPanel;
 #[derive(Component)]
-struct DashText;
+struct DashPip(usize);
 #[derive(Component)]
 struct ItemsRow;
 #[derive(Component)]
@@ -46,8 +71,17 @@ struct PromptBar;
 struct DownedText;
 #[derive(Component)]
 struct ToastList;
+/// A toast: slides in from the right with a colored flash, then fades out.
 #[derive(Component)]
-struct Toast(f32);
+struct Toast {
+    age: f32,
+    life: f32,
+    color: Color,
+}
+#[derive(Component)]
+struct ToastAccent;
+#[derive(Component)]
+struct ToastText;
 #[derive(Component)]
 struct BossBar;
 #[derive(Component)]
@@ -56,6 +90,8 @@ struct BossFill;
 struct BossName;
 #[derive(Component)]
 struct TeamText;
+#[derive(Component)]
+struct HitmarkerRoot;
 #[derive(Component)]
 struct Hitmarker;
 #[derive(Component)]
@@ -108,6 +144,57 @@ impl Plugin for HudPlugin {
     }
 }
 
+/// HUD colors (on top of `widgets.rs`).
+const HUD_BG: Color = Color::srgba(0.06, 0.04, 0.09, 0.72);
+const HUD_EDGE: Color = Color::srgba(0.0, 0.0, 0.0, 0.85);
+const XP_COLOR: Color = Color::srgb(0.30, 0.78, 1.0);
+const XP_LIGHT: Color = Color::srgb(0.72, 0.93, 1.0);
+const HP_GREEN: Color = Color::srgb(0.33, 0.86, 0.42);
+const HP_AMBER: Color = Color::srgb(0.98, 0.70, 0.22);
+const HP_RED: Color = Color::srgb(0.86, 0.16, 0.16);
+const HP_RED_HOT: Color = Color::srgb(1.0, 0.45, 0.38);
+const HP_TRAIL: Color = Color::srgb(1.0, 0.88, 0.68);
+const DARK_INK: Color = Color::srgb(0.12, 0.08, 0.10);
+
+fn lerp_color(a: Color, b: Color, t: f32) -> Color {
+    let (a, b) = (a.to_srgba(), b.to_srgba());
+    let t = t.clamp(0.0, 1.0);
+    Color::srgba(
+        a.red + (b.red - a.red) * t,
+        a.green + (b.green - a.green) * t,
+        a.blue + (b.blue - a.blue) * t,
+        a.alpha + (b.alpha - a.alpha) * t,
+    )
+}
+
+/// A tight drop shadow: the default one (4 px) smears small HUD text.
+fn small_shadow() -> TextShadow {
+    TextShadow { offset: Vec2::splat(1.5), color: Color::srgba(0.0, 0.0, 0.0, 0.85) }
+}
+
+fn hud_text(kind: HudText, size: f32, strong: bool, color: Color) -> impl Bundle {
+    (Text::new(""), if strong { bold(size) } else { font(size) }, TextColor(color), small_shadow(), kind)
+}
+
+/// A small rounded tag ("Monstres niv. 3").
+fn chip(kind: HudText, color: Color) -> impl Bundle {
+    (
+        Node {
+            padding: UiRect::axes(Val::Px(8.0), Val::Px(1.0)),
+            border: UiRect::all(Val::Px(1.0)),
+            border_radius: BorderRadius::MAX,
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.35)),
+        BorderColor::all(color.with_alpha(0.45)),
+        children![hud_text(kind, 13.0, true, color)],
+    )
+}
+
+fn drop_shadow() -> BoxShadow {
+    BoxShadow::new(Color::srgba(0.0, 0.0, 0.0, 0.45), Val::Px(0.0), Val::Px(3.0), Val::Px(0.0), Val::Px(8.0))
+}
+
 fn abs_node(left: Option<f32>, right: Option<f32>, top: Option<f32>, bottom: Option<f32>) -> Node {
     let v = |o: Option<f32>| o.map(Val::Px).unwrap_or(Val::Auto);
     Node {
@@ -126,11 +213,20 @@ fn bar(width: f32, height: f32, fill_color: Color, marker: impl Component) -> im
     (
         Node { width: Val::Px(width), height: Val::Px(height), border_radius: BorderRadius::all(Val::Px(4.0)), ..default() },
         BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.55)),
+        Outline::new(Val::Px(1.0), Val::ZERO, Color::srgba(0.0, 0.0, 0.0, 0.6)),
         children![(
             marker,
             Node { width: Val::Percent(100.0), height: Val::Percent(100.0), border_radius: BorderRadius::all(Val::Px(4.0)), ..default() },
             BackgroundColor(fill_color),
         )],
+    )
+}
+
+/// A glossy highlight over the top of a bar fill.
+fn gloss() -> impl Bundle {
+    (
+        Node { position_type: PositionType::Absolute, top: Val::Px(0.0), width: Val::Percent(100.0), height: Val::Percent(42.0), ..default() },
+        BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.22)),
     )
 }
 
@@ -148,14 +244,6 @@ fn spawn_hud(mut commands: Commands) {
         .id();
     let child = |commands: &mut Commands, bundle: (Node,)| commands.spawn((bundle, ChildOf(root))).id();
 
-    // Team XP bar along the top edge.
-    commands.spawn((
-        Node { position_type: PositionType::Absolute, top: Val::Px(0.0), left: Val::Px(0.0), width: Val::Percent(100.0), height: Val::Px(8.0), ..default() },
-        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)),
-        ChildOf(root),
-        children![(XpFill, Node { width: Val::Percent(0.0), height: Val::Percent(100.0), ..default() }, BackgroundColor(Color::srgb(0.35, 0.8, 1.0)))],
-    ));
-
     // Hurt vignette (full screen, transparent red border).
     commands.spawn((
         HurtVignette,
@@ -170,7 +258,46 @@ fn spawn_hud(mut commands: Commands) {
         ChildOf(root),
     ));
 
-    // Crosshair: a dot + 4 ticks.
+    // Team XP bar along the top edge, with the team level hanging below it.
+    commands.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            top: Val::Px(0.0),
+            left: Val::Px(0.0),
+            width: Val::Percent(100.0),
+            height: Val::Px(10.0),
+            border: UiRect::bottom(Val::Px(1.0)),
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.03, 0.02, 0.07, 0.8)),
+        BorderColor::all(XP_COLOR.with_alpha(0.4)),
+        ChildOf(root),
+        children![(
+            XpFill,
+            Node { width: Val::Percent(0.0), height: Val::Percent(100.0), ..default() },
+            BackgroundColor(XP_COLOR),
+            children![gloss()],
+        )],
+    ));
+    commands.spawn((
+        Node { position_type: PositionType::Absolute, top: Val::Px(10.0), width: Val::Percent(100.0), justify_content: JustifyContent::Center, ..default() },
+        ChildOf(root),
+        children![(
+            LevelBadge,
+            Node {
+                padding: UiRect::new(Val::Px(18.0), Val::Px(18.0), Val::Px(0.0), Val::Px(2.0)),
+                border: UiRect::new(Val::Px(1.0), Val::Px(1.0), Val::Px(0.0), Val::Px(1.0)),
+                border_radius: BorderRadius::bottom(Val::Px(9.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.03, 0.02, 0.07, 0.8)),
+            BorderColor::all(XP_COLOR.with_alpha(0.4)),
+            UiTransform::IDENTITY,
+            children![hud_text(HudText::Level, 15.0, true, XP_LIGHT)],
+        )],
+    ));
+
+    // Crosshair: a dot + 4 ticks, outlined so it reads on any background.
     let center = commands
         .spawn((
             Node {
@@ -184,63 +311,256 @@ fn spawn_hud(mut commands: Commands) {
             ChildOf(root),
         ))
         .id();
-    for (x, y, w, h) in [(-1.0, -1.0, 2.0, 2.0), (-12.0, -1.0, 6.0, 2.0), (6.0, -1.0, 6.0, 2.0), (-1.0, -12.0, 2.0, 6.0), (-1.0, 6.0, 2.0, 6.0)] {
+    for (x, y, w, h) in [(-1.5, -1.5, 3.0, 3.0), (-13.0, -1.0, 7.0, 2.0), (6.0, -1.0, 7.0, 2.0), (-1.0, -13.0, 2.0, 7.0), (-1.0, 6.0, 2.0, 7.0)] {
         commands.spawn((
-            Node { position_type: PositionType::Absolute, left: Val::Px(x), top: Val::Px(y), width: Val::Px(w), height: Val::Px(h), ..default() },
-            BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.9)),
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(x),
+                top: Val::Px(y),
+                width: Val::Px(w),
+                height: Val::Px(h),
+                border_radius: BorderRadius::all(Val::Px(1.0)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.95)),
+            Outline::new(Val::Px(1.0), Val::ZERO, Color::srgba(0.0, 0.0, 0.0, 0.55)),
             ChildOf(center),
         ));
     }
-    commands.spawn((
-        Hitmarker,
-        Node {
-            position_type: PositionType::Absolute,
-            left: Val::Px(-11.0),
-            top: Val::Px(-11.0),
-            width: Val::Px(22.0),
-            height: Val::Px(22.0),
-            border: UiRect::all(Val::Px(3.0)),
-            border_radius: BorderRadius::all(Val::Px(3.0)),
-            ..default()
-        },
-        BorderColor::all(Color::NONE),
-        ChildOf(center),
-    ));
+    // Hitmarker: 4 diagonal strokes around the crosshair (pops on hit).
+    let hit = commands
+        .spawn((
+            HitmarkerRoot,
+            Node { position_type: PositionType::Absolute, width: Val::Px(0.0), height: Val::Px(0.0), ..default() },
+            UiTransform::IDENTITY,
+            ChildOf(center),
+        ))
+        .id();
+    for (sx, sy) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+        let angle: f32 = if sx * sy > 0.0 { -45.0 } else { 45.0 };
+        commands.spawn((
+            Hitmarker,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(sx * 11.0 - 1.5),
+                top: Val::Px(sy * 11.0 - 6.0),
+                width: Val::Px(3.0),
+                height: Val::Px(12.0),
+                border_radius: BorderRadius::all(Val::Px(1.5)),
+                ..default()
+            },
+            BackgroundColor(Color::NONE),
+            UiTransform::from_rotation(Rot2::degrees(angle)),
+            ChildOf(hit),
+        ));
+    }
 
-    // Bottom-left: health, gold, items.
-    let bl = child(&mut commands, (abs_node(Some(24.0), None, None, Some(24.0)),));
-    commands.spawn((label("", 18.0, TEXT), HpText, ChildOf(bl)));
-    commands.spawn((bar(320.0, 18.0, Color::srgb(0.35, 0.85, 0.45), HpFill), ChildOf(bl)));
-    commands.spawn((label("", 26.0, crate::render::palette::GOLD), GoldText, ChildOf(bl)));
+    // Bottom-left: items, gold, health.
+    let bl = child(&mut commands, (Node { row_gap: Val::Px(8.0), ..abs_node(Some(24.0), None, None, Some(24.0)) },));
     commands.spawn((
         ItemsRow,
-        Node { flex_direction: FlexDirection::Row, flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(4.0), row_gap: Val::Px(4.0), max_width: Val::Px(420.0), ..default() },
+        Node { flex_direction: FlexDirection::Row, flex_wrap: FlexWrap::Wrap, column_gap: Val::Px(5.0), row_gap: Val::Px(5.0), max_width: Val::Px(400.0), ..default() },
         ChildOf(bl),
     ));
+    // Gold: a coin drawn from two circles + the amount.
+    commands.spawn((
+        GoldRow,
+        Node { flex_direction: FlexDirection::Row, align_items: AlignItems::Center, column_gap: Val::Px(8.0), ..default() },
+        UiTransform::IDENTITY,
+        ChildOf(bl),
+        children![
+            (
+                Node {
+                    width: Val::Px(24.0),
+                    height: Val::Px(24.0),
+                    border: UiRect::all(Val::Px(2.0)),
+                    border_radius: BorderRadius::MAX,
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                BackgroundColor(GOLD),
+                BorderColor::all(Color::srgb(0.62, 0.38, 0.08)),
+                drop_shadow(),
+                children![(
+                    Node { width: Val::Px(10.0), height: Val::Px(10.0), border: UiRect::all(Val::Px(2.0)), border_radius: BorderRadius::MAX, ..default() },
+                    BorderColor::all(Color::srgb(1.0, 0.93, 0.62)),
+                )],
+            ),
+            hud_text(HudText::Gold, 28.0, true, GOLD),
+        ],
+    ));
+    // Health: framed bar with a damage trail, a shield strip and quarter ticks.
+    let frame = commands
+        .spawn((
+            HpFrame,
+            Node {
+                width: Val::Px(380.0),
+                height: Val::Px(32.0),
+                border: UiRect::all(Val::Px(2.0)),
+                padding: UiRect::all(Val::Px(2.0)),
+                border_radius: BorderRadius::all(Val::Px(8.0)),
+                ..default()
+            },
+            BackgroundColor(HUD_BG),
+            BorderColor::all(HUD_EDGE),
+            drop_shadow(),
+            ChildOf(bl),
+        ))
+        .id();
+    let inner = commands
+        .spawn((Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() }, ChildOf(frame)))
+        .id();
+    let layer = |w: f32| Node {
+        position_type: PositionType::Absolute,
+        left: Val::Px(0.0),
+        top: Val::Px(0.0),
+        width: Val::Percent(w),
+        height: Val::Percent(100.0),
+        border_radius: BorderRadius::all(Val::Px(5.0)),
+        ..default()
+    };
+    commands.spawn((HpPart::Trail, layer(100.0), BackgroundColor(HP_TRAIL), ChildOf(inner)));
+    commands.spawn((HpPart::Fill, layer(100.0), BackgroundColor(HP_GREEN), ChildOf(inner), children![gloss()]));
+    commands.spawn((
+        HpPart::Shield,
+        Node { top: Val::Auto, bottom: Val::Px(0.0), height: Val::Px(5.0), ..layer(0.0) },
+        BackgroundColor(GLOW_CYAN),
+        ChildOf(inner),
+    ));
+    for i in 1..4 {
+        commands.spawn((
+            Node { position_type: PositionType::Absolute, left: Val::Percent(i as f32 * 25.0), top: Val::Px(0.0), width: Val::Px(1.0), height: Val::Percent(100.0), ..default() },
+            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.3)),
+            ChildOf(inner),
+        ));
+    }
+    commands.spawn((
+        Node {
+            position_type: PositionType::Absolute,
+            width: Val::Percent(100.0),
+            height: Val::Percent(100.0),
+            padding: UiRect::horizontal(Val::Px(8.0)),
+            align_items: AlignItems::Center,
+            justify_content: JustifyContent::SpaceBetween,
+            ..default()
+        },
+        ChildOf(inner),
+        children![(Text::new("PV"), bold(14.0), TextColor(TEXT), small_shadow()), hud_text(HudText::Hp, 17.0, true, TEXT)],
+    ));
 
-    // Bottom-right: weapon.
-    let br = child(&mut commands, (Node { align_items: AlignItems::FlexEnd, ..abs_node(None, Some(24.0), None, Some(24.0)) },));
-    commands.spawn((label("", 16.0, TEXT), SlotsText, TextLayout::justify(Justify::Right), ChildOf(br)));
-    commands.spawn((label("", 22.0, TEXT), WeaponText, ChildOf(br)));
-    commands.spawn((Text::new(""), bold(20.0), TextColor(TEXT), TextShadow::default(), AmmoText, ChildOf(br)));
-    commands.spawn((bar(200.0, 6.0, ACCENT, ReloadFill), ChildOf(br)));
-    commands.spawn((label("", 16.0, TEXT_DIM), DashText, ChildOf(br)));
+    // Bottom-right: automatic weapons, then the main weapon card.
+    let br = child(&mut commands, (Node { align_items: AlignItems::FlexEnd, row_gap: Val::Px(8.0), ..abs_node(None, Some(24.0), None, Some(24.0)) },));
+    commands.spawn((
+        SlotsPanel,
+        Node {
+            flex_direction: FlexDirection::Column,
+            align_items: AlignItems::FlexEnd,
+            padding: UiRect::axes(Val::Px(12.0), Val::Px(6.0)),
+            border: UiRect::right(Val::Px(3.0)),
+            border_radius: BorderRadius::all(Val::Px(8.0)),
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.06, 0.04, 0.09, 0.5)),
+        BorderColor::all(TEXT_DIM.with_alpha(0.6)),
+        ChildOf(br),
+        children![(hud_text(HudText::Slots, 15.0, false, TEXT), TextLayout::justify(Justify::Right))],
+    ));
+    let card = commands
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Column,
+                align_items: AlignItems::FlexEnd,
+                min_width: Val::Px(290.0),
+                padding: UiRect::axes(Val::Px(16.0), Val::Px(10.0)),
+                row_gap: Val::Px(5.0),
+                border: UiRect::right(Val::Px(4.0)),
+                border_radius: BorderRadius::all(Val::Px(10.0)),
+                ..default()
+            },
+            BackgroundColor(HUD_BG),
+            BorderColor::all(ACCENT),
+            drop_shadow(),
+            ChildOf(br),
+        ))
+        .id();
+    commands.spawn((
+        Node { flex_direction: FlexDirection::Row, align_items: AlignItems::Center, column_gap: Val::Px(10.0), ..default() },
+        ChildOf(card),
+        children![
+            hud_text(HudText::Weapon, 24.0, true, TEXT),
+            (
+                Node { padding: UiRect::axes(Val::Px(8.0), Val::Px(0.0)), border_radius: BorderRadius::MAX, ..default() },
+                BackgroundColor(ACCENT),
+                children![(Text::new(""), bold(14.0), TextColor(DARK_INK), HudText::WeaponLevel)],
+            ),
+        ],
+    ));
+    commands.spawn((hud_text(HudText::Ammo, 16.0, false, TEXT), ChildOf(card)));
+    commands.spawn((bar(258.0, 6.0, ACCENT, ReloadFill), ChildOf(card)));
+    let dash = commands
+        .spawn((
+            Node { flex_direction: FlexDirection::Row, align_items: AlignItems::Center, column_gap: Val::Px(5.0), margin: UiRect::top(Val::Px(2.0)), ..default() },
+            ChildOf(card),
+        ))
+        .id();
+    commands.spawn((Text::new("DASH"), bold(12.0), TextColor(TEXT_DIM), small_shadow(), ChildOf(dash)));
+    for i in 0..6 {
+        commands.spawn((
+            DashPip(i),
+            Node { width: Val::Px(16.0), height: Val::Px(7.0), border_radius: BorderRadius::all(Val::Px(3.0)), ..default() },
+            BackgroundColor(Color::srgba(1.0, 1.0, 1.0, 0.12)),
+            ChildOf(dash),
+        ));
+    }
+    commands.spawn((Node { margin: UiRect::left(Val::Px(10.0)), ..default() }, ChildOf(dash), children![hud_text(HudText::Jumps, 12.0, true, TEXT_DIM)]));
 
-    // Top-left: run info.
-    let tl = child(&mut commands, (abs_node(Some(24.0), None, Some(20.0), None),));
-    commands.spawn((label("", 22.0, TEXT), RunText, ChildOf(tl)));
+    // Top-left: run info (timer, map, swarm countdown, tags).
+    let tl = child(&mut commands, (abs_node(Some(24.0), None, Some(22.0), None),));
+    let run = commands
+        .spawn((
+            Node {
+                flex_direction: FlexDirection::Row,
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(14.0),
+                padding: UiRect::new(Val::Px(14.0), Val::Px(16.0), Val::Px(8.0), Val::Px(9.0)),
+                border: UiRect::left(Val::Px(4.0)),
+                border_radius: BorderRadius::all(Val::Px(10.0)),
+                ..default()
+            },
+            BackgroundColor(HUD_BG),
+            BorderColor::all(ACCENT),
+            drop_shadow(),
+            ChildOf(tl),
+        ))
+        .id();
+    commands.spawn((hud_text(HudText::Timer, 38.0, true, TEXT), ChildOf(run)));
+    let info = commands
+        .spawn((Node { flex_direction: FlexDirection::Column, row_gap: Val::Px(3.0), ..default() }, ChildOf(run)))
+        .id();
+    commands.spawn((hud_text(HudText::Map, 16.0, true, TEXT), ChildOf(info)));
+    commands.spawn((hud_text(HudText::Swarm, 15.0, false, TEXT_DIM), ChildOf(info)));
+    commands.spawn((
+        Node { flex_direction: FlexDirection::Row, column_gap: Val::Px(6.0), margin: UiRect::top(Val::Px(2.0)), ..default() },
+        ChildOf(info),
+        children![
+            chip(HudText::Mobs, Color::srgb(0.85, 0.8, 1.0)),
+            chip(HudText::Alive, Color::srgb(1.0, 0.62, 0.55)),
+            (TotemChip, chip(HudText::Totems, Color::srgb(1.0, 0.4, 0.35))),
+        ],
+    ));
 
     // Top-right: team.
-    let tr = child(&mut commands, (Node { align_items: AlignItems::FlexEnd, ..abs_node(None, Some(24.0), Some(20.0), None) },));
+    let tr = child(&mut commands, (Node { align_items: AlignItems::FlexEnd, ..abs_node(None, Some(24.0), Some(22.0), None) },));
     commands.spawn((label("", 18.0, TEXT), TeamText, ChildOf(tr)));
 
-    // Top-center: boss bar.
+    // Top-center: boss bar (below the team level badge).
     let top = commands
         .spawn((
             BossBar,
             Node {
                 position_type: PositionType::Absolute,
-                top: Val::Px(24.0),
+                top: Val::Px(46.0),
                 width: Val::Percent(100.0),
                 flex_direction: FlexDirection::Column,
                 align_items: AlignItems::Center,
@@ -252,7 +572,7 @@ fn spawn_hud(mut commands: Commands) {
         ))
         .id();
     commands.spawn((Text::new(""), bold(24.0), TextColor(crate::render::palette::GLOW_ORANGE), TextShadow::default(), BossName, ChildOf(top)));
-    commands.spawn((bar(520.0, 14.0, crate::render::palette::GLOW_MAGENTA, BossFill), ChildOf(top)));
+    commands.spawn((bar(520.0, 14.0, GLOW_MAGENTA, BossFill), ChildOf(top)));
 
     // Center: prompts and downed message.
     let mid = commands
@@ -288,7 +608,7 @@ fn spawn_hud(mut commands: Commands) {
     // Right: toasts.
     commands.spawn((
         ToastList,
-        Node { align_items: AlignItems::FlexEnd, ..abs_node(None, Some(24.0), Some(220.0), None) },
+        Node { align_items: AlignItems::FlexEnd, row_gap: Val::Px(6.0), ..abs_node(None, Some(24.0), Some(200.0), None) },
         ChildOf(root),
     ));
 
@@ -352,79 +672,178 @@ fn local_player<'a>(local: &LocalPlayer, q: &'a Query<LocalQuery>) -> Option<(&'
     q.iter().find(|(p, ..)| Some(p.slot) == local.slot)
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Animation state of the health bar and gold counter.
+#[derive(Default)]
+struct VitalsAnim {
+    /// Where the damage trail stands (fraction of max health).
+    trail: f32,
+    /// Seconds before the trail starts to catch up with the fill.
+    hold: f32,
+    gold: Option<u32>,
+    /// Gold "pop" when the amount changes (1 -> 0).
+    pop: f32,
+}
+
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn update_vitals(
+    time: Res<Time>,
     local: Res<LocalPlayer>,
     players: Query<LocalQuery>,
     info: Query<&MatchInfo>,
-    mut hp_text: Query<&mut Text, (With<HpText>, Without<GoldText>, Without<RunText>)>,
-    mut hp_fill: Query<(&mut Node, &mut BackgroundColor), With<HpFill>>,
-    mut gold: Query<&mut Text, (With<GoldText>, Without<HpText>, Without<RunText>)>,
-    mut run: Query<&mut Text, (With<RunText>, Without<HpText>, Without<GoldText>)>,
+    mut texts: Query<(&mut Text, &mut TextColor, &HudText)>,
+    mut parts: Query<(&mut Node, &mut BackgroundColor, &HpPart), Without<TotemChip>>,
+    mut frame: Query<&mut BorderColor, With<HpFrame>>,
+    mut gold_row: Query<&mut UiTransform, With<GoldRow>>,
+    mut totem_chip: Query<&mut Node, (With<TotemChip>, Without<HpPart>)>,
+    mut anim: Local<VitalsAnim>,
 ) {
+    let dt = time.delta_secs();
+    let mut values: Vec<(HudText, String, Option<Color>)> = Vec::new();
     if let Some((_, health, wallet, _)) = local_player(&local, &players) {
-        if let Ok(mut t) = hp_text.single_mut() {
-            set_text(&mut t, format!("PV {:.0} / {:.0}", health.hp.max(0.0), health.max));
+        let frac = (health.hp / health.max.max(1.0)).clamp(0.0, 1.0) * 0.22; anim.trail = anim.trail.max(0.55); anim.hold = 9.0; // TEMPDBG
+        // Damage trail: holds a moment, then slides down to the new value.
+        if frac >= anim.trail {
+            anim.trail = frac;
+            anim.hold = 0.45;
+        } else if anim.hold > 0.0 {
+            anim.hold -= dt;
+        } else {
+            anim.trail = (anim.trail - dt * 0.6).max(frac);
         }
-        if let Ok((mut node, mut color)) = hp_fill.single_mut() {
-            let frac = (health.hp / health.max).clamp(0.0, 1.0);
-            node.width = Val::Percent(frac * 100.0);
-            color.0 = if frac < 0.3 { Color::srgb(0.95, 0.3, 0.25) } else { Color::srgb(0.35, 0.85, 0.45) };
+        // Low health: the bar and its frame pulse red.
+        let low = frac < 0.3;
+        let pulse = if low { 0.5 + 0.5 * (time.elapsed_secs() * 7.0).sin() } else { 0.0 };
+        let fill_color = if low {
+            lerp_color(HP_RED, HP_RED_HOT, pulse)
+        } else if frac < 0.5 {
+            lerp_color(HP_AMBER, HP_GREEN, (frac - 0.3) / 0.2 * 0.35)
+        } else {
+            HP_GREEN
+        };
+        for (mut node, mut bg, part) in &mut parts {
+            let (width, color) = match part {
+                HpPart::Fill => (frac, fill_color),
+                HpPart::Trail => (anim.trail, HP_TRAIL),
+                HpPart::Shield => (0.15, GLOW_CYAN), // TEMPDBG
+            };
+            node.width = Val::Percent(width * 100.0);
+            if bg.0 != color {
+                bg.0 = color;
+            }
         }
-        if let Ok(mut t) = gold.single_mut() {
-            set_text(&mut t, format!("{} or", wallet.gold));
+        if let Ok(mut border) = frame.single_mut() {
+            *border = BorderColor::all(if low { lerp_color(HUD_EDGE, Color::srgb(1.0, 0.2, 0.15), 0.4 + 0.6 * pulse) } else { HUD_EDGE });
         }
+        let hp = if health.shield > 0.5 {
+            format!("{:.0} / {:.0}  +{:.0}", health.hp.max(0.0), health.max, health.shield)
+        } else {
+            format!("{:.0} / {:.0}", health.hp.max(0.0), health.max)
+        };
+        values.push((HudText::Hp, hp, Some(if low { lerp_color(TEXT, Color::srgb(1.0, 0.75, 0.7), pulse) } else { TEXT })));
+
+        // Gold: the counter pops when it changes.
+        if anim.gold != Some(wallet.gold) {
+            if anim.gold.is_some() {
+                anim.pop = 1.0;
+            }
+            anim.gold = Some(wallet.gold);
+        }
+        anim.pop = (anim.pop - dt * 4.0).max(0.0);
+        if let Ok(mut tr) = gold_row.single_mut() {
+            let s = 1.0 + 0.22 * anim.pop * anim.pop; let s = if s > 0.0 { 1.2 } else { s }; // TEMPDBG
+            if tr.scale.x != s {
+                tr.scale = Vec2::splat(s);
+            }
+        }
+        values.push((HudText::Gold, format!("{}", wallet.gold), None));
     }
-    if let (Ok(m), Ok(mut t)) = (info.single(), run.single_mut()) {
+    if let Ok(m) = info.single() {
         let secs = m.elapsed as u32;
-        let swarm = match m.swarm {
+        values.push((HudText::Timer, format!("{:02}:{:02}", secs / 60, secs % 60), None));
+        values.push((HudText::Map, format!("{}  ·  {}", m.rules.map.name(), m.rules.difficulty.name()), None));
+        let (swarm, color) = match m.swarm {
             0 if m.elapsed < economy::FINAL_SWARM_TIME => {
                 let left = (economy::FINAL_SWARM_TIME - m.elapsed) as u32;
-                format!("Essaim final dans {:02}:{:02}", left / 60, left % 60)
+                let color = if left < 60 { ACCENT } else { TEXT_DIM };
+                (format!("Essaim final dans {:02}:{:02}", left / 60, left % 60), color)
             }
             1 => {
                 let left = (economy::BLACK_GHOSTS_TIME - m.elapsed).max(0.0) as u32;
-                format!("ESSAIM FINAL — fantômes blancs (noirs dans {:02}:{:02})", left / 60, left % 60)
+                (format!("ESSAIM FINAL — fantômes blancs (noirs dans {:02}:{:02})", left / 60, left % 60), GLOW_MAGENTA)
             }
-            _ => "ESSAIM FINAL — fantômes noirs".to_string(),
+            _ => ("ESSAIM FINAL — fantômes noirs".to_string(), GLOW_MAGENTA),
         };
-        let totems = if m.rules.totems > 0 {
-            format!("   ·   Totems ×{} (chance +{:.0}%)", m.rules.totems, m.rules.luck_bonus() * 35.0)
-        } else {
-            String::new()
-        };
-        set_text(&mut t, format!(
-            "{:02}:{:02}   ·   Niveau {}   ·   Monstres niv. {}   ·   {} en vie\n{}\n{} — {}{}",
-            secs / 60,
-            secs % 60,
-            m.team_level,
-            m.level,
-            m.enemies_left,
-            swarm,
-            m.rules.map.name(),
-            m.rules.difficulty.name(),
-            totems
-        ));
+        values.push((HudText::Swarm, swarm, Some(color)));
+        values.push((HudText::Mobs, format!("Monstres niv. {}", m.level), None));
+        values.push((HudText::Alive, format!("{} en vie", m.enemies_left), None));
+        if m.rules.totems > 0 {
+            values.push((HudText::Totems, format!("Totems ×{}  ·  chance +{:.0}%", m.rules.totems, m.rules.luck_bonus() * 35.0), None));
+        }
+        if let Ok(mut node) = totem_chip.single_mut() {
+            let want = if m.rules.totems > 0 { Display::Flex } else { Display::None };
+            if node.display != want {
+                node.display = want;
+            }
+        }
+    }
+    for (mut text, mut color, kind) in &mut texts {
+        if let Some((_, value, c)) = values.iter().find(|(k, ..)| k == kind) {
+            set_text(&mut text, value.as_str());
+            if let Some(c) = c
+                && color.0 != *c
+            {
+                color.0 = *c;
+            }
+        }
     }
 }
 
-/// The team XP bar at the very top of the screen.
-fn update_xp_bar(info: Query<&MatchInfo>, mut fill: Query<&mut Node, With<XpFill>>) {
-    if let (Ok(m), Ok(mut node)) = (info.single(), fill.single_mut()) {
+/// The team XP bar at the very top of the screen, and the level badge (flashes on level up).
+#[allow(clippy::type_complexity)]
+fn update_xp_bar(
+    time: Res<Time>,
+    info: Query<&MatchInfo>,
+    mut fill: Query<(&mut Node, &mut BackgroundColor), With<XpFill>>,
+    mut badge: Query<(&mut UiTransform, &mut BorderColor), With<LevelBadge>>,
+    mut texts: Query<(&mut Text, &HudText)>,
+    mut flash: Local<(u32, f32)>,
+) {
+    let Ok(m) = info.single() else { return };
+    if flash.0 != m.team_level {
+        if flash.0 != 0 {
+            flash.1 = 1.0;
+        }
+        flash.0 = m.team_level;
+    }
+    flash.1 = (flash.1 - time.delta_secs() * 1.5).max(0.0);
+    let f = flash.1;
+    if let Ok((mut node, mut bg)) = fill.single_mut() {
         node.width = Val::Percent((m.xp / m.xp_next.max(1.0)).clamp(0.0, 1.0) * 100.0);
+        bg.0 = lerp_color(XP_COLOR, Color::WHITE, f * 0.8);
+    }
+    if let Ok((mut tr, mut border)) = badge.single_mut() {
+        let s = 1.0 + 0.3 * f * f;
+        if tr.scale.x != s {
+            tr.scale = Vec2::splat(s);
+        }
+        *border = BorderColor::all(lerp_color(XP_COLOR.with_alpha(0.4), XP_LIGHT, f));
+    }
+    for (mut t, kind) in &mut texts {
+        if *kind == HudText::Level {
+            set_text(&mut t, format!("NIVEAU {}", m.team_level));
+        }
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn update_weapon(
     pred: Res<Prediction>,
     local: Res<LocalPlayer>,
     players: Query<LocalQuery>,
-    mut weapon: Query<&mut Text, (With<WeaponText>, Without<AmmoText>, Without<SlotsText>, Without<DashText>)>,
-    mut ammo: Query<&mut Text, (With<AmmoText>, Without<WeaponText>, Without<SlotsText>, Without<DashText>)>,
-    mut slots: Query<&mut Text, (With<SlotsText>, Without<WeaponText>, Without<AmmoText>, Without<DashText>)>,
-    mut dash: Query<&mut Text, (With<DashText>, Without<WeaponText>, Without<AmmoText>, Without<SlotsText>)>,
-    mut reload: Query<&mut Node, With<ReloadFill>>,
+    mut texts: Query<(&mut Text, &HudText)>,
+    mut reload: Query<(&mut Node, &mut BackgroundColor), (With<ReloadFill>, Without<DashPip>)>,
+    mut pips: Query<(&DashPip, &mut Node, &mut BackgroundColor), Without<ReloadFill>>,
+    mut slots_panel: Query<&mut Node, (With<SlotsPanel>, Without<ReloadFill>, Without<DashPip>)>,
     gears: Query<(&Player, &Gear)>,
 ) {
     if !pred.active {
@@ -435,40 +854,62 @@ fn update_weapon(
     let stats = PlayerStats::from_inventory(&items.0);
     let g = &gear.0;
     let p = main_params(g.main, &g.main_up, &stats);
-    if let Ok(mut t) = weapon.single_mut() {
-        set_text(&mut t, format!("{}  Nv {}", g.main.def().name, g.main_up.level + 1));
+    // Automatic weapons, then tomes.
+    let mut lines: Vec<String> = g
+        .autos
+        .iter()
+        .map(|(a, up)| {
+            let ap = auto_params(*a, up, &stats);
+            format!("{}  Nv {}  ·  {:.0}", a.def().name, up.level, ap.damage)
+        })
+        .collect();
+    let tomes: Vec<String> = owned_tomes(&items.0)
+        .into_iter()
+        .map(|t| format!("{} ×{:.1}", t.name().trim_start_matches("Tome "), tome_points(&items.0, t)))
+        .collect();
+    if !tomes.is_empty() {
+        lines.push(format!("Tomes : {}", tomes.join(", ")));
     }
-    if let Ok(mut t) = ammo.single_mut() {
-        set_text(&mut t, format!("{:.0} dégâts  ×{}  {:.1} tirs/s", p.damage, p.count, 1.0 / p.interval.max(0.01)));
-    }
-    if let Ok(mut t) = slots.single_mut() {
-        // Automatic weapons, then tomes.
-        let mut lines: Vec<String> = g
-            .autos
-            .iter()
-            .map(|(a, up)| {
-                let ap = auto_params(*a, up, &stats);
-                format!("{} Nv {} ({:.0})", a.def().name, up.level, ap.damage)
-            })
-            .collect();
-        let tomes: Vec<String> = owned_tomes(&items.0)
-            .into_iter()
-            .map(|t| format!("{} ×{:.1}", t.name().trim_start_matches("Tome "), tome_points(&items.0, t)))
-            .collect();
-        if !tomes.is_empty() {
-            lines.push(format!("Tomes : {}", tomes.join(", ")));
+    if let Ok(mut node) = slots_panel.single_mut() {
+        let want = if lines.is_empty() { Display::None } else { Display::Flex };
+        if node.display != want {
+            node.display = want;
         }
-        set_text(&mut t, lines.join("\n"));
     }
-    if let Ok(mut node) = reload.single_mut() {
-        // Main weapon cooldown.
-        let frac = 1.0 - pred.sim.gun.cooldown / p.interval.max(0.01);
-        node.width = Val::Percent(frac.clamp(0.0, 1.0) * 100.0);
+    let values = [
+        (HudText::Weapon, g.main.def().name.to_string()),
+        (HudText::WeaponLevel, format!("NV {}", g.main_up.level + 1)),
+        (HudText::Ammo, format!("{:.0} dégâts  ·  ×{}  ·  {:.1} tirs/s", p.damage, p.count, 1.0 / p.interval.max(0.01))),
+        (HudText::Slots, lines.join("\n")),
+        (HudText::Jumps, format!("SAUTS {}", stats.movement.air_jumps + 1)),
+    ];
+    for (mut t, kind) in &mut texts {
+        if let Some((_, v)) = values.iter().find(|(k, _)| k == kind) {
+            set_text(&mut t, v.as_str());
+        }
     }
-    if let Ok(mut t) = dash.single_mut() {
-        let full = pred.sim.mv.dash_energy.floor() as usize;
-        let max = stats.movement.dash_charges as usize;
-        set_text(&mut t, format!("Dash {}{}   Sauts {}", "●".repeat(full), "○".repeat(max.saturating_sub(full)), stats.movement.air_jumps + 1));
+    if let Ok((mut node, mut bg)) = reload.single_mut() {
+        // Main weapon cooldown: dim while charging, bright when ready.
+        let frac = (1.0 - pred.sim.gun.cooldown / p.interval.max(0.01)).clamp(0.0, 1.0);
+        node.width = Val::Percent(frac * 100.0);
+        let c = if frac >= 1.0 { ACCENT } else { ACCENT.with_alpha(0.55) };
+        if bg.0 != c {
+            bg.0 = c;
+        }
+    }
+    // Dash charges: full pips glow, the recharging one fills up.
+    let energy = pred.sim.mv.dash_energy.max(0.0);
+    let max = stats.movement.dash_charges as usize;
+    for (pip, mut node, mut bg) in &mut pips {
+        let want = if pip.0 < max { Display::Flex } else { Display::None };
+        if node.display != want {
+            node.display = want;
+        }
+        let fill = (energy - pip.0 as f32).clamp(0.0, 1.0);
+        let c = if fill >= 1.0 { GLOW_CYAN } else { lerp_color(Color::srgba(1.0, 1.0, 1.0, 0.12), GLOW_CYAN.with_alpha(0.5), fill) };
+        if bg.0 != c {
+            bg.0 = c;
+        }
     }
 }
 
@@ -497,17 +938,23 @@ fn update_items(
             continue;
         }
         let [r, g, b] = item.rarity().color();
+        let rarity = Color::srgb(r, g, b);
         let cell = commands
             .spawn((
                 Node {
-                    width: Val::Px(40.0),
-                    height: Val::Px(40.0),
+                    width: Val::Px(42.0),
+                    height: Val::Px(42.0),
                     border: UiRect::all(Val::Px(2.0)),
-                    border_radius: BorderRadius::all(Val::Px(6.0)),
+                    padding: UiRect::all(Val::Px(2.0)),
+                    border_radius: BorderRadius::all(Val::Px(7.0)),
                     ..default()
                 },
-                BorderColor::all(Color::srgb(r, g, b)),
-                BackgroundColor(Color::srgba(0.05, 0.04, 0.08, 0.7)),
+                BorderColor::all(rarity),
+                BackgroundGradient::from(LinearGradient::to_top(vec![
+                    ColorStop::auto(Color::srgba(r * 0.45, g * 0.45, b * 0.45, 0.85)),
+                    ColorStop::auto(Color::srgba(0.05, 0.04, 0.08, 0.8)),
+                ])),
+                drop_shadow(),
                 ChildOf(row),
             ))
             .id();
@@ -518,12 +965,20 @@ fn update_items(
         ));
         if n > 1 {
             commands.spawn((
-                Text::new(format!("{n}")),
-                bold(13.0),
-                TextColor(TEXT),
-                TextShadow::default(),
-                Node { position_type: PositionType::Absolute, right: Val::Px(2.0), bottom: Val::Px(0.0), ..default() },
+                Node {
+                    position_type: PositionType::Absolute,
+                    right: Val::Px(-6.0),
+                    bottom: Val::Px(-6.0),
+                    min_width: Val::Px(17.0),
+                    padding: UiRect::horizontal(Val::Px(4.0)),
+                    justify_content: JustifyContent::Center,
+                    border_radius: BorderRadius::MAX,
+                    ..default()
+                },
+                BackgroundColor(rarity),
+                Outline::new(Val::Px(1.5), Val::ZERO, Color::srgba(0.0, 0.0, 0.0, 0.7)),
                 ChildOf(cell),
+                children![(Text::new(format!("{n}")), bold(12.0), TextColor(DARK_INK))],
             ));
         }
     }
@@ -665,19 +1120,29 @@ fn update_feedback(
     feedback: Res<HudFeedback>,
     local: Res<LocalPlayer>,
     players: Query<LocalQuery>,
-    mut hitmarker: Query<&mut BorderColor, (With<Hitmarker>, Without<HurtVignette>)>,
-    mut vignette: Query<&mut BorderColor, (With<HurtVignette>, Without<Hitmarker>)>,
+    mut hitmarker: Query<&mut BackgroundColor, With<Hitmarker>>,
+    mut hit_root: Query<&mut UiTransform, With<HitmarkerRoot>>,
+    mut vignette: Query<&mut BorderColor, With<HurtVignette>>,
 ) {
-    if let Ok(mut b) = hitmarker.single_mut() {
-        let a = (feedback.hitmarker / 0.18).clamp(0.0, 1.0);
-        let c = if feedback.hitmarker_kill {
-            Color::srgba(1.0, 0.3, 0.3, a)
-        } else if feedback.hitmarker_crit {
-            Color::srgba(1.0, 0.85, 0.2, a)
-        } else {
-            Color::srgba(1.0, 1.0, 1.0, a)
-        };
-        *b = BorderColor::all(c);
+    let a = (feedback.hitmarker / 0.18).clamp(0.0, 1.0);
+    let c = if feedback.hitmarker_kill {
+        Color::srgba(1.0, 0.3, 0.3, a)
+    } else if feedback.hitmarker_crit {
+        Color::srgba(1.0, 0.85, 0.2, a)
+    } else {
+        Color::srgba(1.0, 1.0, 1.0, a)
+    };
+    for mut b in &mut hitmarker {
+        if b.0 != c {
+            b.0 = c;
+        }
+    }
+    if let Ok(mut tr) = hit_root.single_mut() {
+        // Strokes start wide and snap in; kills hit bigger.
+        let s = 1.0 + a * a * if feedback.hitmarker_kill { 0.6 } else { 0.3 };
+        if tr.scale.x != s {
+            tr.scale = Vec2::splat(s);
+        }
     }
     let low_hp = local_player(&local, &players).map(|(_, h, ..)| 1.0 - (h.hp / h.max).clamp(0.0, 1.0)).unwrap_or(0.0);
     if let Ok(mut b) = vignette.single_mut() {
@@ -706,14 +1171,42 @@ fn unlock_next_map(
     config.save();
     info!("map unlocked: {}", next.name());
     if let Ok(list) = list.single() {
-        commands.spawn((
-            Toast(9.0),
-            Node { padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)), border_radius: BorderRadius::all(Val::Px(6.0)), ..default() },
-            BackgroundColor(Color::srgba(0.05, 0.03, 0.08, 0.7)),
-            ChildOf(list),
-            children![label(format!("Nouvelle carte débloquée : {} !", next.name()), 22.0, crate::render::palette::GOLD)],
-        ));
+        spawn_toast(&mut commands, list, format!("Nouvelle carte débloquée : {} !", next.name()), GOLD, 9.0, 20.0);
     }
+}
+
+/// One toast line: a colored accent bar + the message (animated by `age_toasts`).
+fn spawn_toast(commands: &mut Commands, list: Entity, text: String, color: Color, life: f32, size: f32) {
+    commands.spawn((
+        Toast { age: 0.0, life, color },
+        Node {
+            flex_direction: FlexDirection::Row,
+            align_items: AlignItems::Center,
+            column_gap: Val::Px(10.0),
+            max_width: Val::Px(560.0),
+            padding: UiRect::new(Val::Px(0.0), Val::Px(14.0), Val::Px(0.0), Val::Px(0.0)),
+            border_radius: BorderRadius::all(Val::Px(7.0)),
+            ..default()
+        },
+        BackgroundColor(Color::NONE),
+        UiTransform::from_translation(Val2::px(80.0, 0.0)),
+        ChildOf(list),
+        children![
+            (
+                ToastAccent,
+                Node { width: Val::Px(5.0), align_self: AlignSelf::Stretch, border_radius: BorderRadius::left(Val::Px(7.0)), ..default() },
+                BackgroundColor(Color::NONE),
+            ),
+            (
+                ToastText,
+                Text::new(text),
+                bold(size),
+                TextColor(Color::NONE),
+                small_shadow(),
+                Node { margin: UiRect::vertical(Val::Px(6.0)), ..default() },
+            ),
+        ],
+    ));
 }
 
 fn toasts_from_events(
@@ -769,17 +1262,7 @@ fn toasts_from_events(
             }
             GameEvent::GameOver(_) => continue,
         };
-        commands.spawn((
-            Toast(6.0),
-            Node {
-                padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)),
-                border_radius: BorderRadius::all(Val::Px(6.0)),
-                ..default()
-            },
-            BackgroundColor(Color::srgba(0.05, 0.03, 0.08, 0.7)),
-            ChildOf(list),
-            children![label(text, 18.0, color)],
-        ));
+        spawn_toast(&mut commands, list, text, color, 6.0, 16.0);
     }
 }
 
@@ -865,13 +1348,40 @@ fn enemy_markers(
     }
 }
 
-fn age_toasts(mut commands: Commands, time: Res<Time>, mut toasts: Query<(Entity, &mut Toast, &mut BackgroundColor)>) {
-    for (e, mut t, mut bg) in &mut toasts {
-        t.0 -= time.delta_secs();
-        if t.0 <= 0.0 {
+/// Toasts slide in from the right with a flash of their color, then slide
+/// out while fading.
+#[allow(clippy::type_complexity)]
+fn age_toasts(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut toasts: Query<(Entity, &mut Toast, &mut BackgroundColor, &mut UiTransform, &Children)>,
+    mut accents: Query<&mut BackgroundColor, (With<ToastAccent>, Without<Toast>)>,
+    mut texts: Query<(&mut TextColor, &mut TextShadow), With<ToastText>>,
+) {
+    for (e, mut t, mut bg, mut tr, children) in &mut toasts {
+        t.age += time.delta_secs();
+        let left = t.life - t.age;
+        if left <= 0.0 {
             commands.entity(e).try_despawn();
-        } else {
-            bg.0.set_alpha((t.0).min(0.7));
+            continue;
+        }
+        let k = (t.age / 0.28).min(1.0);
+        let ease_in = 1.0 - (1.0 - k).powi(3);
+        let out = (left / 0.45).min(1.0);
+        let alpha = k.min(out);
+        tr.translation = Val2::px((1.0 - ease_in) * 80.0 + (1.0 - out) * 40.0, 0.0);
+        let flash = (1.0 - t.age / 0.6).max(0.0);
+        let base = Color::srgba(0.05, 0.03, 0.08, 0.78);
+        bg.0 = lerp_color(base, t.color.with_alpha(0.78), flash * 0.45).with_alpha(0.78 * alpha);
+        for c in children.iter() {
+            if let Ok(mut a) = accents.get_mut(c) {
+                a.0 = t.color.with_alpha(alpha);
+            }
+            if let Ok((mut text, mut shadow)) = texts.get_mut(c) {
+                // Colored text, nudged toward white so it reads on the dark plate.
+                text.0 = lerp_color(t.color, TEXT, 0.25).with_alpha(alpha);
+                shadow.color = Color::srgba(0.0, 0.0, 0.0, 0.85 * alpha);
+            }
         }
     }
 }
