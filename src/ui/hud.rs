@@ -14,7 +14,6 @@ use crate::render::fx::HudFeedback;
 use crate::render::MainCamera;
 use crate::shared::economy;
 use crate::shared::items::{ItemKind, PlayerStats};
-use crate::shared::mobs::MobKind;
 use crate::shared::weapons::magazine_size;
 
 #[derive(Component)]
@@ -51,6 +50,8 @@ struct Toast(f32);
 struct BossBar;
 #[derive(Component)]
 struct BossFill;
+#[derive(Component)]
+struct BossName;
 #[derive(Component)]
 struct TeamText;
 #[derive(Component)]
@@ -233,7 +234,7 @@ fn spawn_hud(mut commands: Commands) {
             ChildOf(root),
         ))
         .id();
-    commands.spawn((Text::new("COLOSSE"), bold(24.0), TextColor(crate::render::palette::GLOW_ORANGE), TextShadow::default(), ChildOf(top)));
+    commands.spawn((Text::new(""), bold(24.0), TextColor(crate::render::palette::GLOW_ORANGE), TextShadow::default(), BossName, ChildOf(top)));
     commands.spawn((bar(520.0, 14.0, crate::render::palette::GLOW_MAGENTA, BossFill), ChildOf(top)));
 
     // Center: prompts and downed message.
@@ -498,6 +499,7 @@ fn update_prompt(
     states: Query<(&Player, &PlayerState, &Health)>,
     chests: Query<(&Chest, &ChestOpen)>,
     pickups: Query<&WeaponPickup>,
+    statues: Query<(&Statue, &StatueUsed)>,
     pending: Query<(&Player, &Items, Has<PendingChoice>)>,
     info: Query<&MatchInfo>,
     mut prompt: Query<&mut Text, (With<PromptText>, Without<DownedText>)>,
@@ -525,6 +527,18 @@ fn update_prompt(
         {
             text = format!("[E] Maintenir pour réanimer {}", p.name);
             progress = Some(h.revive);
+        } else if let Some(statue) = statues
+            .iter()
+            .filter(|(s, u)| !u.0 && s.pos.distance(pos) < crate::game::chests::STATUE_RANGE)
+            .map(|(s, _)| s)
+            .next()
+        {
+            let boss_alive = info.single().is_ok_and(|m| m.boss_alive);
+            text = if boss_alive {
+                "Statue : un boss est déjà en vie".to_string()
+            } else {
+                format!("[E] Réveiller la statue — invoque : {} (coffre légendaire à la clé)", statue.boss.def().name)
+            };
         } else if let Some(pickup) = pickups
             .iter()
             .filter(|p| p.pos.distance(pos + Vec3::Y * 0.9) < crate::game::chests::PICKUP_RANGE)
@@ -551,16 +565,13 @@ fn update_prompt(
             let stats = PlayerStats::from_inventory(&items);
             let price = crate::game::chests::player_price(chest.kind, wave, &stats);
             let what = chest.kind.name();
-            if choosing {
-                text = "Choisis d'abord ta carte !".to_string();
-            } else
-            {
-                text = if wallet.gold >= price {
-                    format!("[E] Ouvrir le {what} — {price} or")
-                } else {
-                    format!("{what} : il te faut {price} or (tu as {})", wallet.gold)
-                };
-            }
+            text = if choosing {
+                "Choisis d'abord ta carte !".to_string()
+            } else if wallet.gold >= price {
+                format!("[E] Ouvrir le {what} — {price} or")
+            } else {
+                format!("{what} : il te faut {price} or (tu as {})", wallet.gold)
+            };
         }
     }
     if prompt.0 != text {
@@ -585,6 +596,7 @@ fn update_team_and_boss(
     mut team: Query<&mut Text, With<TeamText>>,
     mut boss_bar: Query<&mut Visibility, With<BossBar>>,
     mut boss_fill: Query<&mut Node, With<BossFill>>,
+    mut boss_name: Query<&mut Text, (With<BossName>, Without<TeamText>)>,
 ) {
     if let Ok(mut t) = team.single_mut() {
         let mut sorted: Vec<_> = players.iter().filter(|(p, _)| Some(p.slot) != local.slot).collect();
@@ -599,7 +611,10 @@ fn update_team_and_boss(
             .collect::<Vec<_>>()
             .join("\n"));
     }
-    let boss = bosses.iter().find(|(m, _)| m.kind == MobKind::Colossus);
+    let boss = bosses.iter().find(|(m, _)| m.kind.is_boss());
+    if let (Some((m, _)), Ok(mut name)) = (boss, boss_name.single_mut()) {
+        set_text(&mut name, m.kind.def().name.to_uppercase());
+    }
     if let Ok(mut vis) = boss_bar.single_mut() {
         *vis = if boss.is_some() { Visibility::Inherited } else { Visibility::Hidden };
     }
@@ -657,7 +672,8 @@ fn toasts_from_events(
             GameEvent::AnkhUsed { slot } => (format!("L'Ankh a sauvé {} !", name(*slot)), crate::render::palette::GOLD),
             GameEvent::Downed { slot } => (format!("{} est à terre !", name(*slot)), Color::srgb(1.0, 0.35, 0.3)),
             GameEvent::Revived { slot } => (format!("{} est de retour !", name(*slot)), Color::srgb(0.4, 1.0, 0.6)),
-            GameEvent::BossSpawned => ("Un COLOSSE approche !".to_string(), crate::render::palette::GLOW_ORANGE),
+            GameEvent::BossSpawned => ("Un BOSS approche !".to_string(), crate::render::palette::GLOW_ORANGE),
+            GameEvent::StatueAwakened { .. } => ("Une statue s'éveille… un boss arrive !".to_string(), crate::render::palette::GLOW_MAGENTA),
             GameEvent::BossKilled => ("Le Colosse est tombé !".to_string(), crate::render::palette::GOLD),
             GameEvent::WaveStarted { wave, boss } => (
                 if *boss { format!("Vague {wave} — un BOSS approche !") } else { format!("Vague {wave} !") },

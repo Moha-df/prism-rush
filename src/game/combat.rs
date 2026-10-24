@@ -14,7 +14,7 @@ use super::players::{HurtClock, PendingShots, PlayerScore};
 use super::world::TerrainRes;
 use super::{ServerSet, SimTick};
 use crate::net::protocol::*;
-use crate::shared::economy;
+use crate::shared::economy::{self, ChestKind};
 use crate::shared::items::PlayerStats;
 use crate::shared::mobs::MobKind;
 use crate::shared::movement::{DT, PLAYER_HEIGHT};
@@ -50,6 +50,23 @@ pub struct Explode {
     pub hurts_players: bool,
     pub hurts_mobs: bool,
     pub by: Option<Entity>,
+}
+
+/// A shaman heals the monsters around it.
+#[derive(Message, Clone, Copy, Debug)]
+pub struct HealMobs {
+    pub pos: Vec3,
+    pub radius: f32,
+    /// Fraction of max HP healed.
+    pub fraction: f32,
+}
+
+/// Server data of a boss attack area.
+#[derive(Component, Debug)]
+pub struct HazardServer {
+    pub damage: f32,
+    /// Players already hit (a shockwave hits each player once).
+    pub hit: Vec<Entity>,
 }
 
 /// Recent positions of a monster, to check hits where the *shooter saw it*.
@@ -100,12 +117,13 @@ pub struct CombatPlugin;
 impl Plugin for CombatPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<DamageMob>()
+            .add_message::<HealMobs>()
             .add_message::<DamagePlayer>()
             .add_message::<Explode>()
-            .add_systems(FixedUpdate, (resolve_shots, update_projectiles).chain().in_set(ServerSet::Combat))
+            .add_systems(FixedUpdate, (resolve_shots, update_projectiles, update_hazards).chain().in_set(ServerSet::Combat))
             .add_systems(
                 FixedUpdate,
-                (apply_explosions, apply_mob_damage, apply_player_damage).chain().in_set(ServerSet::Damage),
+                (apply_explosions, apply_heals, apply_mob_damage, apply_player_damage).chain().in_set(ServerSet::Damage),
             );
     }
 }
@@ -360,6 +378,69 @@ fn update_projectiles(
     }
 }
 
+/// Boss attack areas: expanding shockwaves (jump over them) and delayed
+/// lightning strikes (get out of the marked circle).
+fn update_hazards(
+    mut commands: Commands,
+    mut hazards: Query<(Entity, &Hazard, &mut HazardServer)>,
+    players: Query<(Entity, &PlayerState, &Health)>,
+    terrain: Res<TerrainRes>,
+    tick: Res<SimTick>,
+    mut damage: MessageWriter<DamagePlayer>,
+    mut explode: MessageWriter<Explode>,
+    mut fx: MessageWriter<ToClients<Fx>>,
+) {
+    for (entity, hazard, mut data) in &mut hazards {
+        let age = tick.0.saturating_sub(hazard.spawn_tick) as f32 * DT;
+        match hazard.kind {
+            HazardKind::Shockwave => {
+                let radius = age * SHOCKWAVE_SPEED;
+                if radius > SHOCKWAVE_MAX_RADIUS {
+                    commands.entity(entity).try_despawn();
+                    continue;
+                }
+                for (pe, ps, health) in &players {
+                    if health.downed || data.hit.contains(&pe) {
+                        continue;
+                    }
+                    let p = ps.sim.mv.pos;
+                    let d = Vec2::new(p.x - hazard.pos.x, p.z - hazard.pos.z).length();
+                    // Only hurts players touching the ground: a jump dodges it.
+                    let height = p.y - terrain.wgen.ground_height(p.x, p.z);
+                    if (d - radius).abs() < 1.3 && height < 1.0 {
+                        data.hit.push(pe);
+                        damage.write(DamagePlayer { target: pe, amount: data.damage, attacker: None });
+                    }
+                }
+            }
+            HazardKind::Lightning => {
+                if age >= LIGHTNING_DELAY {
+                    explode.write(Explode {
+                        pos: hazard.pos + Vec3::Y * 0.5,
+                        radius: LIGHTNING_RADIUS,
+                        damage: data.damage,
+                        hurts_players: true,
+                        hurts_mobs: false,
+                        by: None,
+                    });
+                    fx.write(ToClients { targets: SendTargets::All, message: Fx::Lightning { pos: hazard.pos } });
+                    commands.entity(entity).try_despawn();
+                }
+            }
+        }
+    }
+}
+
+fn apply_heals(mut heals: MessageReader<HealMobs>, mut mobs: Query<(&MobState, &mut Health), With<Mob>>) {
+    for h in heals.read() {
+        for (state, mut health) in &mut mobs {
+            if health.hp > 0.0 && state.pos.distance(h.pos) < h.radius {
+                health.hp = (health.hp + health.max * h.fraction).min(health.max);
+            }
+        }
+    }
+}
+
 fn apply_explosions(
     mut explosions: MessageReader<Explode>,
     mobs: Query<(Entity, &Mob, &MobState)>,
@@ -405,14 +486,15 @@ fn apply_explosions(
 fn apply_mob_damage(
     mut hits: MessageReader<DamageMob>,
     mut commands: Commands,
-    mut mobs: Query<(&Mob, &mut Health), Without<Player>>,
+    mut mobs: Query<(&Mob, &mut Health, &MobState), Without<Player>>,
     mut players: Query<(&Player, &mut Health, &mut Wallet, &Items, &mut PlayerScore, &mut PlayerState), Without<Mob>>,
     mut info: Single<&mut MatchInfo>,
+    tick: Res<SimTick>,
     mut fx: MessageWriter<ToClients<Fx>>,
     mut events: MessageWriter<ToClients<GameEvent>>,
 ) {
     for hit in hits.read() {
-        let Ok((mob, mut health)) = mobs.get_mut(hit.target) else { continue };
+        let Ok((mob, mut health, mob_state)) = mobs.get_mut(hit.target) else { continue };
         if health.hp <= 0.0 {
             continue; // already dead this tick
         }
@@ -448,11 +530,21 @@ fn apply_mob_damage(
             // Every player gets paid (see economy.rs for why).
             for (_, _, mut wallet, items, mut score, _) in &mut players {
                 let s = PlayerStats::from_inventory(&items.0);
-                let gold = economy::kill_reward(mob.kind.def().gold, info.difficulty, s.gold_mult);
+                let elite = if mob.elite { crate::game::mobs::ELITE_HP } else { 1.0 };
+                let gold = economy::kill_reward(mob.kind.def().gold * elite, info.difficulty, s.gold_mult);
                 wallet.gold += gold;
                 score.gold_earned += gold;
             }
+            // A jelly splits into two small ones.
+            if mob.kind == MobKind::Jelly {
+                for side in [-1.0f32, 1.0] {
+                    let pos = mob_state.pos + Vec3::new(side * 0.8, 0.3, 0.0);
+                    crate::game::mobs::spawn_mob(&mut commands, MobKind::Jellet, pos, mob.level, tick.0, side, false);
+                }
+            }
             if mob.kind.is_boss() {
+                // Bosses leave a legendary chest behind.
+                crate::game::chests::spawn_loot_chest(&mut commands, ChestKind::Legendary, mob_state.pos, u64::from(tick.0));
                 info.boss_alive = false;
                 events.write(ToClients { targets: SendTargets::All, message: GameEvent::BossKilled });
                 info!("boss killed!");

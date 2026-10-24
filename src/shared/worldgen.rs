@@ -160,6 +160,15 @@ pub struct Decor {
     pub variant: f32,
 }
 
+/// A boss summoning statue (rare).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct StatueSpot {
+    pub id: u64,
+    pub pos: Vec3,
+    /// Which boss (index into `MobKind::BOSSES`).
+    pub boss: usize,
+}
+
 /// Everything inside one chunk (besides the height field).
 #[derive(Clone, Debug, Default)]
 pub struct ChunkData {
@@ -168,6 +177,7 @@ pub struct ChunkData {
     pub pads: Vec<JumpPad>,
     pub chests: Vec<ChestSpot>,
     pub decor: Vec<Decor>,
+    pub statues: Vec<StatueSpot>,
 }
 
 /// The world generator. Cheap to copy: it only holds the seed.
@@ -436,6 +446,18 @@ impl WorldGen {
             }
         }
 
+        // Rare boss statue (in open ground).
+        if rng.chance(0.07)
+            && let Some(p) = random_point(&mut rng, 5.0)
+            && !chunk.solids.iter().any(|s| s.push_out_xz(p, 3.0).is_some())
+        {
+            chunk.statues.push(StatueSpot {
+                id: hash_2d(self.seed ^ 0x57A7_0E00, coord.x, coord.y),
+                pos: Vec3::new(p.x, self.ground_height(p.x, p.y), p.y),
+                boss: rng.range_u32(0, 3) as usize,
+            });
+        }
+
         // Occasional free-standing jump pad for fun.
         if theme != 3
             && rng.chance(0.12)
@@ -482,6 +504,7 @@ impl WorldGen {
         });
         chunk.chests.retain(|c| outside(c.pos, 4.5));
         chunk.pads.retain(|p| outside(p.pos, p.radius + 1.0));
+        chunk.statues.retain(|s| outside(s.pos, 6.0));
 
         chunk
     }
@@ -645,6 +668,7 @@ mod tests {
                 assert_eq!(ca.chests, cb.chests);
                 assert_eq!(ca.pads, cb.pads);
                 assert_eq!(ca.decor, cb.decor);
+                assert_eq!(ca.statues, cb.statues);
             }
         }
     }

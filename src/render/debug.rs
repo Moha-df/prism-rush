@@ -16,7 +16,7 @@ pub struct DebugPlugin;
 impl Plugin for DebugPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, auto_screenshots.run_if(|c: Res<AppConfig>| c.shots.is_some()))
-            .add_systems(Update, demo_scene.run_if(|c: Res<AppConfig>| c.shots.is_some()))
+            .add_systems(Update, (demo_scene, demo_cards).run_if(|c: Res<AppConfig>| c.shots.is_some()))
             .add_systems(Update, diag_mobs.run_if(|c: Res<AppConfig>| c.autopilot));
     }
 }
@@ -33,7 +33,7 @@ fn demo_scene(
     use crate::net::protocol::{PendingChoice, WeaponPickup};
     use crate::shared::economy::ChestKind;
     use crate::shared::items::ItemKind;
-    if *done || time.elapsed_secs() < 12.0 || !role.is_authority() {
+    if *done || time.elapsed_secs() < 5.0 || !role.is_authority() {
         return;
     }
     let Some((entity, _, state, mut items)) = players.iter_mut().find(|(_, p, ..)| p.slot == 0) else { return };
@@ -42,14 +42,47 @@ fn demo_scene(
         items.0.add(item);
     }
     let forward = Vec3::new(-state.yaw.sin(), 0.0, -state.yaw.cos());
+    let right = Vec3::new(forward.z, 0.0, -forward.x);
+    // Gallery of the new V2 monsters (one elite) + a statue + a shockwave.
+    use crate::shared::mobs::MobKind;
+    let gallery = [MobKind::Charger, MobKind::Jelly, MobKind::Shaman, MobKind::HiveQueen, MobKind::StormTitan];
+    for (i, kind) in gallery.iter().enumerate() {
+        let p = state.sim.mv.pos + forward * 22.0 + right * ((i as f32 - 2.0) * 7.0) + Vec3::Y * if kind.def().flying { 3.0 } else { 0.3 };
+        crate::game::mobs::spawn_mob(&mut commands, *kind, p, 1, 0, 0.0, i == 0);
+    }
+    commands.spawn((
+        bevy_replicon::prelude::Replicated,
+        crate::net::protocol::Statue { spot_id: 42, pos: state.sim.mv.pos + forward * 8.0 - right * 6.0, boss: MobKind::HiveQueen },
+        crate::net::protocol::StatueUsed(false),
+    ));
     commands.spawn((
         bevy_replicon::prelude::Replicated,
         WeaponPickup { kind: crate::shared::weapons::WeaponKind::Railgun, pos: state.sim.mv.pos + forward * 3.0 + Vec3::Y * 0.9 },
     ));
-    commands.entity(entity).insert(PendingChoice {
+    commands.entity(entity).insert(DemoCards(8.0));
+    let _ = PendingChoice {
         chest: ChestKind::Large,
-        options: vec![ItemKind::DragonHeart, ItemKind::FrogLegs, ItemKind::EnergyShield, ItemKind::GatlingSoul],
-    });
+        options: vec![],
+    };
+}
+
+/// Opens the demo card choice a few seconds after the gallery.
+#[derive(Component)]
+struct DemoCards(f32);
+
+fn demo_cards(mut commands: Commands, time: Res<Time>, mut q: Query<(Entity, &mut DemoCards)>) {
+    use crate::net::protocol::PendingChoice;
+    use crate::shared::economy::ChestKind;
+    use crate::shared::items::ItemKind;
+    for (e, mut d) in &mut q {
+        d.0 -= time.delta_secs();
+        if d.0 <= 0.0 {
+            commands.entity(e).remove::<DemoCards>().insert(PendingChoice {
+                chest: ChestKind::Large,
+                options: vec![ItemKind::DragonHeart, ItemKind::FrogLegs, ItemKind::EnergyShield, ItemKind::GatlingSoul],
+            });
+        }
+    }
 }
 
 fn auto_screenshots(

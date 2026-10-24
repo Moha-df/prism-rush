@@ -120,7 +120,42 @@ pub struct Items(pub Inventory);
 pub struct Mob {
     pub kind: MobKind,
     pub level: u32,
+    /// Elite: bigger, tougher, glowing, pays more.
+    pub elite: bool,
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HazardKind {
+    /// Expanding ring on the ground: jump over it!
+    Shockwave,
+    /// Marked spot hit by lightning after a delay.
+    Lightning,
+}
+
+/// A boss attack area, replicated once; clients animate it from its spawn tick.
+#[derive(Component, Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct Hazard {
+    pub kind: HazardKind,
+    pub pos: Vec3,
+    pub spawn_tick: u32,
+}
+
+pub const SHOCKWAVE_SPEED: f32 = 13.0;
+pub const SHOCKWAVE_MAX_RADIUS: f32 = 38.0;
+pub const LIGHTNING_DELAY: f32 = 1.2;
+pub const LIGHTNING_RADIUS: f32 = 3.2;
+
+/// A boss summoning statue found in the world.
+#[derive(Component, Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct Statue {
+    pub spot_id: u64,
+    pub pos: Vec3,
+    pub boss: MobKind,
+}
+
+/// Mutable statue state.
+#[derive(Component, Clone, Copy, Debug, Default, Serialize, Deserialize)]
+pub struct StatueUsed(pub bool);
 
 /// What a monster is doing, for animations.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -253,6 +288,10 @@ pub enum Fx {
     Warp { from: Vec3, to: Vec3 },
     /// Electric arc between two points (Tesla coil).
     Arc { from: Vec3, to: Vec3 },
+    /// A shaman healed the monsters around it.
+    Heal { pos: Vec3, radius: f32 },
+    /// A lightning bolt struck the ground.
+    Lightning { pos: Vec3 },
 }
 
 /// Server -> clients: important events (reliable).
@@ -266,6 +305,7 @@ pub enum GameEvent {
     Downed { slot: u8 },
     Revived { slot: u8 },
     BossSpawned,
+    StatueAwakened { pos: Vec3 },
     BossKilled,
     WaveStarted { wave: u32, boss: bool },
     WaveCleared { wave: u32 },
@@ -308,6 +348,9 @@ pub fn register_protocol(app: &mut App) {
         .replicate::<ChestOpen>()
         .replicate_once::<Projectile>()
         .replicate_once::<WeaponPickup>()
+        .replicate_once::<Hazard>()
+        .replicate_once::<Statue>()
+        .replicate::<StatueUsed>()
         .add_client_message::<Hello>(Channel::Ordered)
         .add_client_message::<InputBatch>(Channel::Unreliable)
         .add_client_message::<LobbyCommand>(Channel::Ordered)

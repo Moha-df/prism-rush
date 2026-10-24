@@ -255,7 +255,7 @@ pub fn back_to_lobby(mut commands: Commands, mut info: Single<&mut MatchInfo>, p
 /// Despawns monsters, chests and projectiles (the run's world).
 pub fn despawn_world_entities(
     mut commands: Commands,
-    q: Query<Entity, Or<(With<Mob>, With<Chest>, With<Projectile>, With<WeaponPickup>)>>,
+    q: Query<Entity, Or<(With<Mob>, With<Chest>, With<Projectile>, With<WeaponPickup>, With<Hazard>, With<Statue>)>>,
 ) {
     for e in &q {
         commands.entity(e).try_despawn();

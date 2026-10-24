@@ -16,6 +16,18 @@ pub enum MobKind {
     Brute,
     /// Huge boss: slam shockwave + projectile volleys.
     Colossus,
+    /// Crystal rhino: winds up, then charges in a straight line.
+    Charger,
+    /// Slime that splits into two small ones when it dies.
+    Jelly,
+    /// Small slime born from a Jelly.
+    Jellet,
+    /// Floating mask that heals nearby monsters and throws slow orbs.
+    Shaman,
+    /// Flying boss: summons swarms and rains bolts.
+    HiveQueen,
+    /// Ground boss: shockwaves to jump over + telegraphed lightning strikes.
+    StormTitan,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -45,8 +57,17 @@ pub struct MobDef {
 }
 
 impl MobKind {
-    pub const SPAWNABLE: [MobKind; 5] =
-        [MobKind::Skitter, MobKind::Spitter, MobKind::Wisp, MobKind::Bomber, MobKind::Brute];
+    pub const SPAWNABLE: [MobKind; 8] = [
+        MobKind::Skitter,
+        MobKind::Spitter,
+        MobKind::Wisp,
+        MobKind::Bomber,
+        MobKind::Brute,
+        MobKind::Charger,
+        MobKind::Jelly,
+        MobKind::Shaman,
+    ];
+    pub const BOSSES: [MobKind; 3] = [MobKind::Colossus, MobKind::HiveQueen, MobKind::StormTitan];
 
     pub fn def(self) -> MobDef {
         match self {
@@ -152,11 +173,113 @@ impl MobKind {
                 flying: false,
                 ranged: true,
             },
+            MobKind::Charger => MobDef {
+                name: "Chargeur",
+                hp: 170.0,
+                speed: 5.0,
+                radius: 0.9,
+                height: 1.5,
+                damage: 22.0,
+                attack_range: 16.0,
+                attack_cooldown: 3.5,
+                windup: 0.9,
+                cost: 3.0,
+                gold: 8.0,
+                unlock_wave: 3,
+                spawn_weight: 1.3,
+                flying: false,
+                ranged: true,
+            },
+            MobKind::Jelly => MobDef {
+                name: "Gelée",
+                hp: 90.0,
+                speed: 3.8,
+                radius: 0.8,
+                height: 1.2,
+                damage: 9.0,
+                attack_range: 1.9,
+                attack_cooldown: 1.4,
+                windup: 0.4,
+                cost: 2.0,
+                gold: 4.0,
+                unlock_wave: 2,
+                spawn_weight: 1.6,
+                flying: false,
+                ranged: false,
+            },
+            MobKind::Jellet => MobDef {
+                name: "Gelette",
+                hp: 28.0,
+                speed: 7.0,
+                radius: 0.4,
+                height: 0.6,
+                damage: 4.0,
+                attack_range: 1.3,
+                attack_cooldown: 1.0,
+                windup: 0.25,
+                cost: 0.0,
+                gold: 1.0,
+                unlock_wave: 999,
+                spawn_weight: 0.0,
+                flying: false,
+                ranged: false,
+            },
+            MobKind::Shaman => MobDef {
+                name: "Chaman",
+                hp: 85.0,
+                speed: 4.5,
+                radius: 0.6,
+                height: 1.4,
+                damage: 12.0,
+                attack_range: 30.0,
+                attack_cooldown: 3.5,
+                windup: 0.8,
+                cost: 4.0,
+                gold: 10.0,
+                unlock_wave: 5,
+                spawn_weight: 0.8,
+                flying: true,
+                ranged: true,
+            },
+            MobKind::HiveQueen => MobDef {
+                name: "Reine de la ruche",
+                hp: 3400.0,
+                speed: 5.5,
+                radius: 2.2,
+                height: 3.5,
+                damage: 14.0,
+                attack_range: 40.0,
+                attack_cooldown: 2.0,
+                windup: 0.8,
+                cost: 0.0,
+                gold: 160.0,
+                unlock_wave: 999,
+                spawn_weight: 0.0,
+                flying: true,
+                ranged: true,
+            },
+            MobKind::StormTitan => MobDef {
+                name: "Titan de foudre",
+                hp: 5200.0,
+                speed: 3.0,
+                radius: 2.6,
+                height: 7.5,
+                damage: 30.0,
+                attack_range: 45.0,
+                attack_cooldown: 3.2,
+                windup: 1.1,
+                cost: 0.0,
+                gold: 180.0,
+                unlock_wave: 999,
+                spawn_weight: 0.0,
+                flying: false,
+                ranged: true,
+            },
         }
     }
 
     pub fn is_boss(self) -> bool {
-        self == MobKind::Colossus
+        Self::BOSSES.contains(&self)
     }
 }
 
@@ -173,7 +296,10 @@ mod tests {
             assert!(d.hp > 0.0);
             assert!(!kind.is_boss());
         }
-        assert!(MobKind::Colossus.is_boss());
+        for boss in MobKind::BOSSES {
+            assert!(boss.is_boss());
+            assert!(boss.def().hp > 2000.0);
+        }
     }
 
     #[test]

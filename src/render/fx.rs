@@ -246,6 +246,22 @@ fn on_server_fx(
                 }
             }
             Fx::Gold { .. } => {}
+            Fx::Heal { pos, radius } => {
+                for i in 0..16 {
+                    let a = i as f32 / 16.0 * std::f32::consts::TAU;
+                    let p = *pos + Vec3::new(a.cos() * radius * 0.6, 0.5, a.sin() * radius * 0.6);
+                    burst(&mut commands, &mut cache, &mut meshes, &mut materials, rng, p, 1, palette::GLOW_TOXIC, 4.0, 1.5, 0.15, 0.9, -2.0);
+                }
+                sfx.write(PlaySfx { volume: 0.6, ..PlaySfx::at(Sfx::Revived, *pos) });
+            }
+            Fx::Lightning { pos } => {
+                tracer(&mut commands, &mut cache, &mut meshes, &mut materials, *pos + Vec3::new(1.5, 40.0, -1.0), *pos, Color::srgb(0.85, 0.95, 1.0), 0.5);
+                tracer(&mut commands, &mut cache, &mut meshes, &mut materials, *pos + Vec3::new(-1.0, 25.0, 1.5), *pos, palette::GLOW_CYAN, 0.25);
+                flash_light(&mut commands, *pos + Vec3::Y * 2.0, palette::GLOW_CYAN, 3_000_000.0, 25.0, 0.25);
+                sfx.write(PlaySfx::at(Sfx::Explosion, *pos));
+                let d = pos.distance(cam);
+                cam_fx.add_trauma((0.5 - d / 40.0).max(0.0));
+            }
             Fx::Arc { from, to } => {
                 tracer(&mut commands, &mut cache, &mut meshes, &mut materials, *from, *to, palette::GLOW_CYAN, 0.08);
                 burst(&mut commands, &mut cache, &mut meshes, &mut materials, rng, *to, 6, palette::GLOW_CYAN, 6.0, 5.0, 0.06, 0.25, 0.0);
@@ -282,6 +298,11 @@ fn on_game_events(
                 // A beam of light rising from the chest, colored by chest rarity.
                 tracer(&mut commands, &mut cache, &mut meshes, &mut materials, p, p + Vec3::Y * 12.0, color, 0.25);
                 sfx.write(PlaySfx::at(Sfx::ChestOpen, *pos));
+            }
+            GameEvent::StatueAwakened { pos } => {
+                burst(&mut commands, &mut cache, &mut meshes, &mut materials, rng, *pos + Vec3::Y * 2.0, 40, palette::GLOW_MAGENTA, 5.0, 8.0, 0.15, 1.2, -1.0);
+                flash_light(&mut commands, *pos + Vec3::Y * 3.0, palette::GLOW_MAGENTA, 2_000_000.0, 30.0, 1.0);
+                sfx.write(PlaySfx::ui(Sfx::BossRoar));
             }
             GameEvent::Gained { slot, .. } => {
                 if Some(*slot) == local.slot {

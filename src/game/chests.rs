@@ -13,6 +13,7 @@ use super::{ServerSet, SimTick};
 use crate::net::protocol::*;
 use crate::shared::economy::{self, ChestKind};
 use crate::shared::items::PlayerStats;
+use crate::shared::mobs::MobKind;
 use crate::shared::rng::{hash_combine, Rng};
 use crate::shared::weapons::WeaponKind;
 use crate::shared::worldgen::{chunk_of, CHUNK_SIZE};
@@ -25,6 +26,9 @@ const CHEST_FORGET_DISTANCE: f32 = CHUNK_SIZE * 6.0;
 pub struct ChestRegistry {
     pub spawned: HashMap<u64, Entity>,
     pub opened: HashSet<u64>,
+    /// Statues: spawned ones, and those already awakened this run.
+    pub statues: HashMap<u64, Entity>,
+    pub statues_used: HashSet<u64>,
 }
 
 /// Despawns the entity after a delay (opened chests linger a bit).
@@ -37,7 +41,7 @@ impl Plugin for ChestsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ChestRegistry>().add_systems(
             FixedUpdate,
-            (stream_chests, pick_up_weapons, open_chests, despawn_after).chain().in_set(ServerSet::World),
+            (stream_chests, pick_up_weapons, awaken_statues, open_chests, despawn_after).chain().in_set(ServerSet::World),
         )
         .add_systems(PreUpdate, receive_choices.after(ServerSystems::Receive).run_if(in_state(ServerState::Running)));
     }
@@ -62,6 +66,17 @@ fn stream_chests(
         for dz in -CHEST_STREAM_RADIUS..=CHEST_STREAM_RADIUS {
             for dx in -CHEST_STREAM_RADIUS..=CHEST_STREAM_RADIUS {
                 let chunk = t.cache.get_or_generate(&t.wgen, c + IVec2::new(dx, dz));
+                for st in &chunk.statues {
+                    if registry.statues.contains_key(&st.id) {
+                        continue;
+                    }
+                    let used = registry.statues_used.contains(&st.id);
+                    let boss = MobKind::BOSSES[st.boss % MobKind::BOSSES.len()];
+                    let e = commands
+                        .spawn((Replicated, Statue { spot_id: st.id, pos: st.pos, boss }, StatueUsed(used)))
+                        .id();
+                    registry.statues.insert(st.id, e);
+                }
                 for spot in &chunk.chests {
                     if registry.spawned.contains_key(&spot.id) || registry.opened.contains(&spot.id) {
                         continue;
@@ -214,6 +229,48 @@ fn open_chests(
 /// Price of a chest for a given player (Treasure Map discount).
 pub fn player_price(kind: ChestKind, wave: u32, stats: &PlayerStats) -> u32 {
     ((economy::chest_price(kind, wave) as f32) * stats.price_mult).round() as u32
+}
+
+pub const STATUE_RANGE: f32 = 3.5;
+
+/// Pressing E at a statue summons its boss right now (one boss at a time).
+/// It's a gamble: a tough fight, but every boss drops a legendary chest.
+#[allow(clippy::too_many_arguments)]
+fn awaken_statues(
+    mut commands: Commands,
+    mut players: Query<(&Player, &PlayerState, &mut Intent, &Health)>,
+    mut statues: Query<(&Statue, &mut StatueUsed)>,
+    mut registry: ResMut<ChestRegistry>,
+    mut info: Single<&mut MatchInfo>,
+    terrain: Res<TerrainRes>,
+    tick: Res<SimTick>,
+    mut events: MessageWriter<ToClients<GameEvent>>,
+) {
+    for (player, state, mut intent, health) in &mut players {
+        if !intent.interact_pressed || health.downed {
+            continue;
+        }
+        let pos = state.sim.mv.pos;
+        let Some((statue, mut used)) = statues.iter_mut().find(|(s, u)| !u.0 && s.pos.distance(pos) < STATUE_RANGE) else {
+            continue;
+        };
+        intent.interact_pressed = false;
+        if info.boss_alive {
+            continue; // one boss at a time
+        }
+        used.0 = true;
+        registry.statues_used.insert(statue.spot_id);
+        let angle = (pos - statue.pos).with_y(0.0).normalize_or_zero();
+        let x = statue.pos.x - angle.x * 25.0;
+        let z = statue.pos.z - angle.z * 25.0;
+        let spawn = Vec3::new(x, terrain.wgen.ground_height(x, z) + if statue.boss.def().flying { 8.0 } else { 0.2 }, z);
+        let level = economy::monster_level(info.wave.max(1));
+        crate::game::mobs::spawn_mob(&mut commands, statue.boss, spawn, level, tick.0, 0.0, false);
+        info.boss_alive = true;
+        info!("{} awakened a statue: {:?}", player.name, statue.boss);
+        events.write(ToClients { targets: SendTargets::All, message: GameEvent::StatueAwakened { pos: statue.pos } });
+        events.write(ToClients { targets: SendTargets::All, message: GameEvent::BossSpawned });
+    }
 }
 
 /// Applies the card chosen by a player.

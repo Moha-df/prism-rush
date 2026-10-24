@@ -3,7 +3,8 @@
 
 use bevy::prelude::*;
 
-use super::model::{spawn_model, PrimCache};
+use super::model::{spawn_model, AnimTag, Part, PrimCache};
+use super::palette;
 use super::models;
 use crate::net::interp::LocalAvatar;
 use crate::net::protocol::*;
@@ -46,8 +47,39 @@ impl Plugin for AvatarsPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (attach_models, detach_player_models, place_chests, update_anim_states).chain(),
+            (attach_models, detach_player_models, place_chests, update_anim_states, grow_shockwaves, dim_used_statues).chain(),
         );
+    }
+}
+
+/// Shockwave rings grow with time (in the server's present, so what you see
+/// is exactly when you must jump).
+fn grow_shockwaves(
+    clock: Res<crate::net::client::ServerClock>,
+    hazards: Query<(&Hazard, &HasModel)>,
+    mut models: Query<&mut Transform, Without<HasModel>>,
+) {
+    for (h, has) in &hazards {
+        if h.kind != HazardKind::Shockwave {
+            continue;
+        }
+        let age = ((clock.estimate - f64::from(h.spawn_tick)) / crate::shared::movement::TICK_HZ).max(0.0) as f32;
+        let radius = (age * SHOCKWAVE_SPEED).max(0.1);
+        if let Ok(mut t) = models.get_mut(has.model) {
+            t.scale = Vec3::new(radius, 1.0, radius);
+        }
+    }
+}
+
+/// Awakened statues lose their magic glow (hidden model glow ring).
+fn dim_used_statues(statues: Query<(&StatueUsed, &HasModel), Changed<StatueUsed>>, mut models: Query<&mut Transform, Without<HasModel>>) {
+    for (used, has) in &statues {
+        if used.0
+            && let Ok(mut t) = models.get_mut(has.model)
+        {
+            // Sink the statue a little: it "spent" its power.
+            t.translation.y = -0.6;
+        }
     }
 }
 
@@ -77,6 +109,8 @@ fn attach_models(
     chests: Query<(Entity, &Chest), NeedsModel>,
     projectiles: Query<(Entity, &Projectile), NeedsModel>,
     pickups: Query<(Entity, &WeaponPickup), NeedsModel>,
+    statues: Query<(Entity, &Statue), NeedsModel>,
+    hazards: Query<(Entity, &Hazard), NeedsModel>,
 ) {
     let mut attach = |commands: &mut Commands, entity: Entity, part: super::model::Part, stride: f32| {
         let model = spawn_child_model(commands, &mut cache, &mut meshes, &mut materials, entity, &part);
@@ -87,7 +121,28 @@ fn attach_models(
     }
     for (e, m) in &mobs {
         let def = m.kind.def();
-        attach(&mut commands, e, models::mob(m.kind), (def.height * 0.6).max(0.8));
+        let model = if m.elite {
+            // Elites: bigger, with a golden aura ring and a little crown.
+            models::scale_part(models::mob(m.kind), 1.3)
+                .with(Part::torus(def.radius * 3.0, 0.1).at(0.0, 0.15, 0.0).color(palette::GOLD).glow(4.0).tag(AnimTag::Pulse))
+                .with(Part::cone(0.3, 0.35).at(0.0, def.height * 1.3 + 0.3, 0.0).color(palette::GOLD).glow(2.0).tag(AnimTag::Bob))
+        } else {
+            models::mob(m.kind)
+        };
+        attach(&mut commands, e, model, (def.height * 0.6).max(0.8));
+    }
+    for (e, s) in &statues {
+        attach(&mut commands, e, models::statue(s.boss), 1.0);
+    }
+    for (e, h) in &hazards {
+        let part = match h.kind {
+            // Unit ring, scaled every frame to the shockwave radius.
+            HazardKind::Shockwave => Part::torus(2.0, 0.6).color(palette::GLOW_CYAN).glow(5.0),
+            HazardKind::Lightning => Part::pivot()
+                .with(Part::cylinder(LIGHTNING_RADIUS * 2.0, 0.06).color(palette::GLOW_MAGENTA).glow(2.5).tag(AnimTag::Pulse))
+                .with(Part::torus(LIGHTNING_RADIUS * 2.0, 0.15).color(palette::GLOW_MAGENTA).glow(5.0)),
+        };
+        attach(&mut commands, e, part, 1.0);
     }
     for (e, c) in &chests {
         attach(&mut commands, e, models::chest(c.kind), 1.0);
@@ -116,7 +171,15 @@ fn place_chests(
     mut commands: Commands,
     chests: Query<(Entity, &Chest), Without<Transform>>,
     pickups: Query<(Entity, &WeaponPickup), Without<Transform>>,
+    statues: Query<(Entity, &Statue), Without<Transform>>,
+    hazards: Query<(Entity, &Hazard), Without<Transform>>,
 ) {
+    for (e, s) in &statues {
+        commands.entity(e).try_insert((Transform::from_translation(s.pos), Visibility::default()));
+    }
+    for (e, h) in &hazards {
+        commands.entity(e).try_insert((Transform::from_translation(h.pos + Vec3::Y * 0.15), Visibility::default()));
+    }
     for (e, c) in &chests {
         commands
             .entity(e)

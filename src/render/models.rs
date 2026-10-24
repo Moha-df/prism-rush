@@ -82,7 +82,205 @@ pub fn mob(kind: MobKind) -> Part {
         MobKind::Bomber => bomber(),
         MobKind::Brute => brute(),
         MobKind::Colossus => colossus(),
+        MobKind::Charger => charger(),
+        MobKind::Jelly => jelly(),
+        MobKind::Jellet => scale_part(jelly(), 0.5),
+        MobKind::Shaman => shaman(),
+        MobKind::HiveQueen => hive_queen(),
+        MobKind::StormTitan => storm_titan(),
     }
+}
+
+/// Crystal rhino: low, wide, a big glowing horn. Reads as "it will charge".
+fn charger() -> Part {
+    let leg = |x: f32, z: f32, tag: AnimTag| {
+        Part::pivot()
+            .at(x, 0.75, z)
+            .tag(tag)
+            .with(Part::cylinder(0.34, 0.75).at(0.0, -0.37, 0.0).color(PLUM_DARK))
+            .with(Part::cube(0.4, 0.15, 0.45).at(0.0, -0.72, -0.05).color(STONE))
+    };
+    let head = Part::pivot()
+        .at(0.0, 0.95, -1.05)
+        .tag(AnimTag::Head)
+        .with(Part::cube(0.8, 0.6, 0.75).color(PLUM))
+        .with(Part::cone(0.38, 1.0).at(0.0, 0.25, -0.45).rot_x(-65.0).color(CRYSTAL_CYAN).glow(3.0))
+        .with(Part::cone(0.2, 0.45).at(0.0, 0.42, -0.05).rot_x(-30.0).color(CRYSTAL_CYAN).glow(3.0))
+        .with(Part::ico(0.12, 0.12, 0.12).at(0.28, 0.1, -0.38).color(GLOW_ORANGE).glow(5.0))
+        .with(Part::ico(0.12, 0.12, 0.12).at(-0.28, 0.1, -0.38).color(GLOW_ORANGE).glow(5.0));
+    let body = Part::pivot()
+        .tag(AnimTag::Body)
+        .with(Part::ellipsoid(1.5, 1.1, 2.1).at(0.0, 0.95, 0.0).color(PLUM))
+        .with(Part::cube(1.1, 0.25, 1.4).at(0.0, 1.5, 0.1).rot_x(-6.0).color(STONE))
+        .with(Part::ico(0.4, 0.5, 0.4).at(0.3, 1.65, 0.3).color(CRYSTAL_CYAN).glow(2.0))
+        .with(Part::ico(0.3, 0.45, 0.3).at(-0.3, 1.62, -0.1).color(CRYSTAL_CYAN).glow(2.0))
+        .with(Part::cone(0.15, 0.4).at(0.0, 0.9, 1.1).rot_x(110.0).color(PLUM_DARK))
+        .with(head);
+    Part::pivot()
+        .with(leg(0.5, -0.65, AnimTag::LegL))
+        .with(leg(-0.5, -0.65, AnimTag::LegR))
+        .with(leg(0.5, 0.65, AnimTag::LegR))
+        .with(leg(-0.5, 0.65, AnimTag::LegL))
+        .with(body)
+}
+
+/// Wobbly slime with a dark core and big cartoon eyes.
+fn jelly() -> Part {
+    let eye = |x: f32| {
+        Part::pivot()
+            .at(x, 0.85, -0.6)
+            .with(Part::sphere(0.3).color(rgb(1.0, 1.0, 1.0)))
+            .with(Part::sphere(0.14).at(0.0, 0.0, -0.12).color(PLUM_DARK))
+    };
+    Part::pivot().with(
+        Part::pivot()
+            .tag(AnimTag::Pulse)
+            .with(Part::ellipsoid(1.6, 1.15, 1.6).at(0.0, 0.58, 0.0).color(rgb(0.45, 0.85, 0.35)).glow(0.35))
+            .with(Part::ico(0.7, 0.6, 0.7).at(0.0, 0.55, 0.1).color(rgb(0.2, 0.45, 0.15)))
+            .with(Part::sphere(0.25).at(0.45, 1.05, 0.3).color(rgb(0.6, 1.0, 0.5)).glow(0.8))
+            .with(Part::sphere(0.18).at(-0.4, 1.0, 0.4).color(rgb(0.6, 1.0, 0.5)).glow(0.8))
+            .with(eye(0.3))
+            .with(eye(-0.3))
+            .with(Part::cube(0.4, 0.06, 0.05).at(0.0, 0.55, -0.79).color(PLUM_DARK)),
+    )
+}
+
+/// Floating bone mask with a glowing staff: the healer to focus first.
+fn shaman() -> Part {
+    let feather = |a: f32| Part::prism(0.08, 0.6, 0.25).at(0.0, 0.55, 0.05).rot_z(a).color(if a > 0.0 { GLOW_TOXIC } else { GLOW_MAGENTA }).glow(1.5);
+    Part::pivot().with(
+        Part::pivot()
+            .tag(AnimTag::Bob)
+            .with(Part::cone(0.9, 1.1).at(0.0, 0.45, 0.0).rot_x(180.0).color(PLUM).tag(AnimTag::Wing(0.0)))
+            .with(
+                Part::pivot()
+                    .at(0.0, 1.05, 0.0)
+                    .tag(AnimTag::Head)
+                    .with(Part::cube(0.65, 0.85, 0.18).color(BONE))
+                    .with(Part::ico(0.14, 0.18, 0.1).at(0.15, 0.12, -0.1).color(GLOW_MAGENTA).glow(5.0))
+                    .with(Part::ico(0.14, 0.18, 0.1).at(-0.15, 0.12, -0.1).color(GLOW_MAGENTA).glow(5.0))
+                    .with(Part::cube(0.3, 0.05, 0.04).at(0.0, -0.2, -0.1).color(PLUM_DARK))
+                    .with(feather(-25.0))
+                    .with(feather(0.0))
+                    .with(feather(25.0)),
+            )
+            .with(
+                Part::pivot()
+                    .at(0.55, 0.9, -0.1)
+                    .tag(AnimTag::ArmR)
+                    .with(Part::cylinder(0.06, 1.4).at(0.0, -0.1, 0.0).color(BARK))
+                    .with(Part::ico(0.28, 0.28, 0.28).at(0.0, 0.7, 0.0).color(GLOW_TOXIC).glow(5.0))
+                    .with(Part::torus(0.45, 0.05).at(0.0, 0.7, 0.0).color(GOLD).tag(AnimTag::Spin(3.0))),
+            ),
+    )
+}
+
+/// Giant wasp queen: striped abdomen, four wings, crown.
+fn hive_queen() -> Part {
+    let yellow = rgb(0.95, 0.72, 0.12);
+    let wing = |x: f32, z: f32, phase: f32| {
+        Part::pivot()
+            .at(x, 0.9, z)
+            .tag(AnimTag::Wing(phase))
+            .with(Part::ellipsoid(2.6, 0.08, 1.0).at(x.signum() * 1.3, 0.0, 0.0).rot_z(-x.signum() * 15.0).color(rgb(0.85, 0.9, 1.0)).glow(0.6))
+    };
+    let mut abdomen = Part::pivot()
+        .at(0.0, 0.0, 1.9)
+        .rot_x(15.0)
+        .with(Part::ellipsoid(2.0, 1.9, 3.0).color(yellow))
+        .with(Part::cone(0.4, 1.0).at(0.0, -0.2, 1.8).rot_x(90.0).color(PLUM_DARK));
+    for z in [-0.6f32, 0.2, 1.0] {
+        abdomen = abdomen.with(Part::torus(1.9 - z.abs() * 0.4, 0.28).at(0.0, 0.0, z).rot_x(90.0).color(PLUM_DARK));
+    }
+    let mut crown = Part::pivot().at(0.0, 0.75, 0.0);
+    for i in -2..=2 {
+        crown = crown.with(Part::cone(0.2, 0.6 - (i as f32).abs() * 0.12).at(i as f32 * 0.22, 0.0, 0.0).color(GOLD).glow(1.0));
+    }
+    let head = Part::pivot()
+        .at(0.0, 0.2, -1.7)
+        .tag(AnimTag::Head)
+        .with(Part::sphere(1.2).color(PLUM_DARK))
+        .with(Part::ico(0.45, 0.55, 0.3).at(0.38, 0.1, -0.4).color(GLOW_MAGENTA).glow(5.0))
+        .with(Part::ico(0.45, 0.55, 0.3).at(-0.38, 0.1, -0.4).color(GLOW_MAGENTA).glow(5.0))
+        .with(Part::cone(0.12, 0.7).at(0.3, -0.5, -0.4).rot_x(160.0).color(BONE).tag(AnimTag::Jaw))
+        .with(Part::cone(0.12, 0.7).at(-0.3, -0.5, -0.4).rot_x(160.0).color(BONE))
+        .with(crown);
+    Part::pivot().with(
+        Part::pivot()
+            .at(0.0, 1.8, 0.0)
+            .tag(AnimTag::Bob)
+            .with(Part::ellipsoid(1.7, 1.5, 1.9).color(yellow))
+            .with(Part::torus(1.5, 0.25).rot_x(90.0).color(PLUM_DARK))
+            .with(abdomen)
+            .with(head)
+            .with(wing(0.6, -0.2, 0.0))
+            .with(wing(-0.6, -0.2, 0.5))
+            .with(wing(0.6, 0.5, 0.25))
+            .with(wing(-0.6, 0.5, 0.75)),
+    )
+}
+
+/// Storm titan: dark stone giant studded with cyan crystals, lightning crown.
+fn storm_titan() -> Part {
+    let leg = Part::pivot()
+        .at(1.0, 2.6, 0.0)
+        .tag(AnimTag::LegL)
+        .with(Part::cube(1.1, 2.6, 1.1).at(0.0, -1.3, 0.0).color(STONE_DARK))
+        .with(Part::cube(1.4, 0.5, 1.7).at(0.0, -2.4, -0.2).color(STONE))
+        .with(Part::ico(0.4, 0.6, 0.4).at(0.4, -1.0, -0.5).color(CRYSTAL_CYAN).glow(3.0));
+    let arm = Part::pivot()
+        .at(2.0, 5.6, 0.0)
+        .tag(AnimTag::ArmL)
+        .with(Part::cube(1.0, 2.8, 1.0).at(0.0, -1.4, 0.0).rot_z(8.0).color(STONE))
+        .with(Part::ico(1.4, 1.6, 1.4).at(0.2, -3.1, 0.0).color(STONE_DARK))
+        .with(Part::ico(0.5, 0.9, 0.5).at(0.25, -3.1, -0.6).color(CRYSTAL_CYAN).glow(4.0));
+    let mut crown = Part::pivot().at(0.0, 7.8, 0.0).tag(AnimTag::Spin(1.2));
+    for i in 0..6 {
+        let a = i as f32 / 6.0 * std::f32::consts::TAU;
+        crown = crown.with(Part::ico(0.35, 1.0, 0.35).at(a.cos() * 1.3, (i as f32).sin() * 0.2, a.sin() * 1.3).color(CRYSTAL_CYAN).glow(5.0));
+    }
+    let body = Part::pivot()
+        .tag(AnimTag::Body)
+        .with(Part::cube(3.0, 3.2, 2.0).at(0.0, 4.3, 0.0).rot_x(8.0).color(STONE))
+        .with(Part::ico(1.2, 1.5, 0.6).at(0.0, 4.5, -1.0).color(CRYSTAL_CYAN).glow(4.0))
+        .with(Part::ico(0.9, 1.2, 0.9).at(1.5, 5.9, 0.0).color(CRYSTAL_CYAN).glow(3.0))
+        .with(Part::ico(0.9, 1.2, 0.9).at(-1.5, 5.9, 0.0).color(CRYSTAL_CYAN).glow(3.0))
+        .with(
+            Part::pivot()
+                .at(0.0, 6.4, -0.2)
+                .tag(AnimTag::Head)
+                .with(Part::cube(1.3, 1.1, 1.2).color(STONE_DARK))
+                .with(Part::cube(1.0, 0.18, 0.1).at(0.0, 0.1, -0.62).color(GLOW_CYAN).glow(6.0)),
+        )
+        .with(arm.mirrored_x())
+        .with(arm)
+        .with(crown);
+    Part::pivot().with(leg.mirrored_x()).with(leg).with(body)
+}
+
+/// Same model turned to stone (statues): grey colors, no glow.
+pub fn petrify(mut p: Part) -> Part {
+    let s = p.color.to_srgba();
+    let v = (s.red + s.green + s.blue) / 3.0 * 0.5 + 0.3;
+    p.color = rgb(v, v * 0.98, v * 1.04);
+    p.glow = 0.0;
+    p.tag = match p.tag {
+        Some(AnimTag::Spin(_)) | Some(AnimTag::Bob) => p.tag,
+        _ => None,
+    };
+    p.children = p.children.into_iter().map(petrify).collect();
+    p
+}
+
+/// A boss statue: stone pedestal with a petrified, scaled-down boss on top.
+pub fn statue(boss: MobKind) -> Part {
+    let scale = 2.6 / boss.def().height;
+    let lift = if boss.def().flying { -1.4 * scale } else { 0.0 };
+    Part::pivot()
+        .with(Part::cube(3.0, 0.4, 3.0).at(0.0, 0.2, 0.0).color(STONE_DARK))
+        .with(Part::cube(2.4, 0.9, 2.4).at(0.0, 0.85, 0.0).color(STONE))
+        .with(Part::cube(2.5, 0.12, 2.5).at(0.0, 1.32, 0.0).color(GLOW_MAGENTA).glow(1.5))
+        .with(scale_part(petrify(mob(boss)), scale).at(0.0, 1.35 + lift, 0.0))
 }
 
 fn skitter() -> Part {

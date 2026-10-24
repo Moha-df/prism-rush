@@ -8,7 +8,7 @@
 use bevy::prelude::*;
 use bevy_replicon::prelude::*;
 
-use super::combat::{DamagePlayer, Explode, MobHistory, ProjectileServer};
+use super::combat::{DamagePlayer, Explode, HazardServer, HealMobs, MobHistory, ProjectileServer};
 use super::world::TerrainRes;
 use super::{ServerSet, SimTick};
 use crate::net::protocol::*;
@@ -52,6 +52,12 @@ pub struct MobAi {
     pub retarget: f32,
     pub phase: f32,
     pub stuck: f32,
+    /// Charger: remaining charge time and locked direction.
+    pub charge_timer: f32,
+    pub charge_dir: Vec3,
+    pub charge_hits: Vec<Entity>,
+    /// Number of attacks done (bosses alternate their attacks).
+    pub attacks: u32,
 }
 
 const ACID_GRAVITY: f32 = 18.0;
@@ -67,12 +73,16 @@ impl Plugin for MobsPlugin {
     }
 }
 
-pub fn spawn_mob(commands: &mut Commands, kind: MobKind, pos: Vec3, level: u32, tick: u32, phase: f32) -> Entity {
-    let hp = kind.def().hp * economy::monster_hp_mult(level);
+/// Elites have this many times the HP (and pay this many times the gold).
+pub const ELITE_HP: f32 = 3.0;
+pub const ELITE_DAMAGE: f32 = 1.5;
+
+pub fn spawn_mob(commands: &mut Commands, kind: MobKind, pos: Vec3, level: u32, tick: u32, phase: f32, elite: bool) -> Entity {
+    let hp = kind.def().hp * economy::monster_hp_mult(level) * if elite { ELITE_HP } else { 1.0 };
     commands
         .spawn((
             Replicated,
-            Mob { kind, level },
+            Mob { kind, level, elite },
             MobState { pos, yaw: 0.0, tick, anim: MobAnim::Move },
             Health::new(hp),
             MobAi { phase, cooldown: 1.0, ..default() },
@@ -81,9 +91,14 @@ pub fn spawn_mob(commands: &mut Commands, kind: MobKind, pos: Vec3, level: u32, 
         .id()
 }
 
-/// Boss of a boss wave.
-pub fn boss_for_wave(_wave: u32) -> MobKind {
-    MobKind::Colossus
+/// Boss of a boss wave: Colossus, Queen, Titan, then again (stronger).
+pub fn boss_for_wave(wave: u32) -> MobKind {
+    MobKind::BOSSES[((wave / 5).max(1) as usize - 1) % MobKind::BOSSES.len()]
+}
+
+/// Chance that a spawned monster is an elite.
+pub fn elite_chance(wave: u32) -> f32 {
+    if wave < 3 { 0.0 } else { (0.03 * (wave - 2) as f32).min(0.35) }
 }
 
 /// A random point on a ring around one of `anchors`, on the ground.
@@ -144,7 +159,7 @@ fn director(
             if dir.boss_pending && dir.spawn_timer <= 0.0 {
                 dir.boss_pending = false;
                 let pos = ring_point(&terrain, &mut dir.rng, &alive, 35.0, 45.0);
-                spawn_mob(&mut commands, boss_for_wave(wave), pos, level, tick.0, 0.0);
+                spawn_mob(&mut commands, boss_for_wave(wave), pos, level, tick.0, 0.0, false);
                 info.boss_alive = true;
                 events.write(ToClients { targets: SendTargets::All, message: GameEvent::BossSpawned });
                 info!("BOSS spawned at {pos:?}");
@@ -181,7 +196,8 @@ fn director(
                 let mut pos = center + offset;
                 pos.y = terrain.wgen.ground_height(pos.x, pos.z) + if kind.def().flying { 6.0 } else { 0.2 };
                 let phase = dir.rng.range(0.0, 100.0);
-                spawn_mob(&mut commands, kind, pos, level, tick.0, phase + i as f32);
+                let elite = dir.rng.chance(elite_chance(wave));
+                spawn_mob(&mut commands, kind, pos, level, tick.0, phase + i as f32, elite);
                 dir.budget -= cost;
                 dir.spawned += 1;
             }
@@ -241,6 +257,7 @@ fn mob_ai(
     tick: Res<SimTick>,
     mut damage: MessageWriter<DamagePlayer>,
     mut explode: MessageWriter<Explode>,
+    mut heal: MessageWriter<HealMobs>,
     mut fx: MessageWriter<ToClients<Fx>>,
 ) {
     let targets: Vec<(Entity, Vec3, Vec3)> = players
@@ -254,7 +271,7 @@ fn mob_ai(
             continue;
         }
         let def = mob.kind.def();
-        let dmg_mult = economy::monster_damage_mult(mob.level);
+        let dmg_mult = economy::monster_damage_mult(mob.level) * if mob.elite { ELITE_DAMAGE } else { 1.0 };
         ai.phase += DT;
         ai.cooldown -= DT;
         ai.attack_anim = (ai.attack_anim - DT).max(0.0);
@@ -298,13 +315,30 @@ fn mob_ai(
                     let goal = tpos + Vec3::new(angle.cos() * 11.0, 5.5 + (ai.phase * 1.3).sin(), angle.sin() * 11.0);
                     (goal - state.pos).clamp_length_max(def.speed)
                 }
+                MobKind::Shaman => {
+                    // Keeps its distance, floating low, behind the other monsters.
+                    let ground = terrain.wgen.ground_height(state.pos.x, state.pos.z);
+                    let radial = if dist > 24.0 { dir } else if dist < 15.0 { -dir } else { side * 0.5 };
+                    let lift = Vec3::Y * ((ground + 2.5 + (ai.phase * 2.0).sin() * 0.4) - state.pos.y);
+                    (radial * def.speed + lift).clamp_length_max(def.speed)
+                }
+                MobKind::HiveQueen => {
+                    // Circles high above the players.
+                    let angle = ai.phase * 0.35;
+                    let goal = tpos + Vec3::new(angle.cos() * 18.0, 9.0 + (ai.phase * 0.8).sin() * 1.5, angle.sin() * 18.0);
+                    (goal - state.pos).clamp_length_max(def.speed)
+                }
+                MobKind::StormTitan if dist < 12.0 => Vec3::ZERO,
+                MobKind::Charger if dist < 6.0 => side * def.speed,
                 _ => dir * def.speed,
             };
 
             // --- Attacks: wind-up (telegraph) then strike.
             let in_range = if def.ranged { dist < def.attack_range } else { to.length() < def.attack_range };
-            if ai.windup <= 0.0 && ai.cooldown <= 0.0 && in_range {
+            if ai.windup <= 0.0 && ai.cooldown <= 0.0 && ai.charge_timer <= 0.0 && in_range {
                 ai.windup = def.windup;
+                // The charger aims when it starts snorting: dodge sideways!
+                ai.charge_dir = dir;
                 fx.write(ToClients { targets: SendTargets::All, message: Fx::MobAttack { pos: state.pos, kind: mob.kind } });
             }
             if ai.windup > 0.0 {
@@ -315,7 +349,65 @@ fn mob_ai(
                     ai.attack_anim = 0.35;
                     let damage_amount = def.damage * dmg_mult;
                     let eye = state.pos + Vec3::Y * def.height * 0.7;
+                    ai.attacks += 1;
                     match mob.kind {
+                        MobKind::Charger => {
+                            ai.charge_timer = 1.1;
+                            ai.charge_hits.clear();
+                        }
+                        MobKind::Jelly | MobKind::Jellet => {
+                            if to.length() < def.attack_range * 1.5 {
+                                damage.write(DamagePlayer { target: target_entity, amount: damage_amount, attacker: Some(entity) });
+                            }
+                        }
+                        MobKind::Shaman => {
+                            heal.write(HealMobs { pos: state.pos, radius: 14.0, fraction: 0.2 });
+                            fx.write(ToClients { targets: SendTargets::All, message: Fx::Heal { pos: state.pos, radius: 14.0 } });
+                            let vel = (chest - eye).normalize_or_zero() * 13.0;
+                            spawn_enemy_projectile(&mut commands, ProjectileKind::Bolt, eye, vel, 0.0, damage_amount, 0.0, tick.0);
+                        }
+                        MobKind::HiveQueen => {
+                            if ai.attacks.is_multiple_of(3) {
+                                // Summon a swarm around her.
+                                for i in 0..4 {
+                                    let a = i as f32 * std::f32::consts::FRAC_PI_2 + ai.phase;
+                                    let x = state.pos.x + a.cos() * 4.0;
+                                    let z = state.pos.z + a.sin() * 4.0;
+                                    let pos = Vec3::new(x, terrain.wgen.ground_height(x, z) + 0.3, z);
+                                    spawn_mob(&mut commands, MobKind::Skitter, pos, mob.level, tick.0, a, false);
+                                }
+                            } else {
+                                for i in -2..=2 {
+                                    let aim = chest + side * (i as f32 * 2.5) + tvel * 0.4;
+                                    let vel = (aim - eye).normalize_or_zero() * 22.0;
+                                    spawn_enemy_projectile(&mut commands, ProjectileKind::Bolt, eye, vel, 0.0, damage_amount, 0.0, tick.0);
+                                }
+                            }
+                        }
+                        MobKind::StormTitan => {
+                            if ai.attacks.is_multiple_of(2) {
+                                // Ring on the ground: jump over it!
+                                commands.spawn((
+                                    Replicated,
+                                    Hazard { kind: HazardKind::Shockwave, pos: state.pos, spawn_tick: tick.0 },
+                                    HazardServer { damage: damage_amount, hit: Vec::new() },
+                                ));
+                            } else {
+                                // Marked lightning strikes around the target.
+                                for i in 0..4 {
+                                    let a = i as f32 * 1.7 + ai.phase;
+                                    let r = if i == 0 { 0.0 } else { 4.0 + i as f32 * 1.5 };
+                                    let x = tpos.x + tvel.x * 0.8 + a.cos() * r;
+                                    let z = tpos.z + tvel.z * 0.8 + a.sin() * r;
+                                    let pos = Vec3::new(x, terrain.wgen.ground_height(x, z), z);
+                                    commands.spawn((
+                                        Replicated,
+                                        Hazard { kind: HazardKind::Lightning, pos, spawn_tick: tick.0 },
+                                        HazardServer { damage: damage_amount, hit: Vec::new() },
+                                    ));
+                                }
+                            }
+                        }
                         MobKind::Skitter => {
                             if to.length() < def.attack_range * 1.5 {
                                 damage.write(DamagePlayer { target: target_entity, amount: damage_amount, attacker: Some(entity) });
@@ -390,6 +482,18 @@ fn mob_ai(
             want = Vec3::new((ai.phase * 0.3).cos(), 0.0, (ai.phase * 0.3).sin()) * def.speed * 0.3;
         }
 
+        // --- Charger rush: locked direction, very fast, hurts on contact.
+        if ai.charge_timer > 0.0 {
+            ai.charge_timer -= DT;
+            want = ai.charge_dir * 24.0;
+            for (pe, ppos, _) in &targets {
+                if !ai.charge_hits.contains(pe) && ppos.distance(state.pos) < def.radius + 1.0 {
+                    ai.charge_hits.push(*pe);
+                    damage.write(DamagePlayer { target: *pe, amount: def.damage * dmg_mult, attacker: Some(entity) });
+                }
+            }
+        }
+
         // --- Physics.
         if def.flying {
             ai.vel = ai.vel.lerp(want, (4.0 * DT).min(1.0));
@@ -427,7 +531,7 @@ fn mob_ai(
 
         state.anim = if ai.windup > 0.0 {
             MobAnim::Windup
-        } else if ai.attack_anim > 0.0 {
+        } else if ai.attack_anim > 0.0 || ai.charge_timer > 0.0 {
             MobAnim::Attack
         } else {
             MobAnim::Move
