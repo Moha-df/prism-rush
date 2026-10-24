@@ -641,6 +641,10 @@ fn spawn_hud(mut commands: Commands) {
                 Node { flex_direction: FlexDirection::Row, ..default() },
                 children![button("FOV −", UiAction::FovDown, 150.0), button("FOV +", UiAction::FovUp, 150.0)]
             ),
+            (
+                Node { flex_direction: FlexDirection::Row, ..default() },
+                children![button("Tremblement −", UiAction::ShakeDown, 150.0), button("Tremblement +", UiAction::ShakeUp, 150.0)]
+            ),
             button("Reprendre", UiAction::Resume, 308.0),
             button("Quitter la partie", UiAction::Leave, 308.0),
         ],
@@ -1511,6 +1515,8 @@ fn pause_actions(
             UiAction::VolUp => config.volume = (config.volume + 0.1).min(1.5),
             UiAction::FovDown => config.fov = (config.fov - 5.0).max(70.0),
             UiAction::FovUp => config.fov = (config.fov + 5.0).min(120.0),
+            UiAction::ShakeDown => config.shake = (config.shake - 0.25).max(0.0),
+            UiAction::ShakeUp => config.shake = (config.shake + 0.25).min(1.0),
             UiAction::Leave => {
                 net.write(NetCommand::Leave);
             }
@@ -1520,10 +1526,11 @@ fn pause_actions(
     }
     if let Ok(mut t) = values.single_mut() {
         let s = format!(
-            "Sensibilité {:.1}   ·   Volume {:.0}%   ·   FOV {:.0}°",
+            "Sensibilité {:.1}   ·   Volume {:.0}%   ·   FOV {:.0}°   ·   Tremblement {:.0}%",
             config.sensitivity,
             config.volume * 100.0,
-            config.fov
+            config.fov,
+            config.shake * 100.0
         );
         if t.0 != s {
             t.0 = s;

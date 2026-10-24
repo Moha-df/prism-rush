@@ -24,6 +24,8 @@ pub enum UiAction {
     SensUp,
     VolDown,
     VolUp,
+    ShakeDown,
+    ShakeUp,
     FovDown,
     FovUp,
     /// Join the n-th game of the public list shown in the menu.

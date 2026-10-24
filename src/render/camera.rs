@@ -254,7 +254,8 @@ fn update_camera(
 
     // Shake: random-ish offsets from sines at unrelated frequencies.
     fx.trauma = (fx.trauma - dt * 1.6).max(0.0);
-    let shake = fx.trauma * fx.trauma;
+    // Scaled by the "camera shake" setting (0 = none).
+    let shake = fx.trauma * fx.trauma * config.shake;
     let t = fx.time * 30.0;
     let shake_rot = Vec3::new((t * 1.3).sin(), (t * 1.7 + 1.0).sin(), (t * 2.1 + 2.0).sin()) * shake * 0.05;
 

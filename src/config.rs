@@ -31,6 +31,8 @@ pub struct AppConfig {
     pub sensitivity: f32,
     pub fov: f32,
     pub volume: f32,
+    /// Camera shake strength, 0 (none) to 1 (full).
+    pub shake: f32,
     pub bots: u8,
     pub autostart: bool,
     /// Solo game: not announced in the public list.
@@ -105,6 +107,7 @@ impl Default for AppConfig {
             sensitivity: 1.0,
             fov: 95.0,
             volume: 0.6,
+            shake: 1.0,
             bots: 0,
             autostart: false,
             solo: false,
@@ -145,6 +148,7 @@ impl AppConfig {
                 "sensitivity" => cfg.sensitivity = value.parse().unwrap_or(cfg.sensitivity),
                 "fov" => cfg.fov = value.parse().unwrap_or(cfg.fov),
                 "volume" => cfg.volume = value.parse().unwrap_or(cfg.volume),
+                "shake" => cfg.shake = value.parse::<f32>().unwrap_or(cfg.shake).clamp(0.0, 1.0),
                 "silver" => cfg.silver = value.parse().unwrap_or(0),
                 "unlocked_mains" => cfg.unlocked_mains = parse_list(value, &MainWeapon::ALL),
                 "unlocked_autos" => cfg.unlocked_autos = parse_list(value, &AutoWeapon::ALL),
@@ -185,12 +189,13 @@ impl AppConfig {
             return;
         }
         let text = format!(
-            "name={}\nlast_address={}\nsensitivity={}\nfov={}\nvolume={}\nsilver={}\nmain_weapon={}\nstart_auto={}\nunlocked_mains={}\nunlocked_autos={}\ndifficulty={}\nmap={}\nmaps_unlocked={}\n",
+            "name={}\nlast_address={}\nsensitivity={}\nfov={}\nvolume={}\nshake={}\nsilver={}\nmain_weapon={}\nstart_auto={}\nunlocked_mains={}\nunlocked_autos={}\ndifficulty={}\nmap={}\nmaps_unlocked={}\n",
             self.name,
             self.last_address,
             self.sensitivity,
             self.fov,
             self.volume,
+            self.shake,
             self.silver,
             self.main_weapon.index(),
             self.start_auto.map(|a| a.index().to_string()).unwrap_or_default(),
