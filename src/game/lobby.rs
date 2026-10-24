@@ -16,6 +16,7 @@ use crate::bot::BotBrain;
 use crate::config::AppConfig;
 use crate::net::protocol::*;
 use crate::net::{LocalPlayer, NetRole};
+use crate::shared::build::{Loadout, MainWeapon};
 use crate::shared::economy;
 use crate::shared::items::{Inventory, PlayerStats};
 use crate::shared::sim::PlayerSim;
@@ -29,7 +30,7 @@ impl Plugin for LobbyPlugin {
             .add_systems(OnEnter(ServerState::Running), setup_server_match)
             .add_systems(
                 PreUpdate,
-                (handle_hello, handle_lobby_commands).after(ServerSystems::Receive).run_if(in_state(ServerState::Running)),
+                (handle_hello, handle_lobby_commands, handle_pick_main).after(ServerSystems::Receive).run_if(in_state(ServerState::Running)),
             )
             .add_systems(
                 FixedUpdate,
@@ -75,22 +76,32 @@ fn setup_server_match(
     ));
     let mut slot = 0u8;
     if *role == NetRole::Host {
-        commands.spawn(player_bundle(slot, config.name.clone(), false, Owner { client: Some(ClientId::Server) }));
+        commands.spawn((
+            player_bundle(slot, config.name.clone(), false, Owner { client: Some(ClientId::Server) }, config.main_weapon),
+            super::progress::AutoPool(config.auto_pool()),
+        ));
         local.slot = Some(slot);
         slot += 1;
     }
     for i in 0..config.bots.min(MAX_PLAYERS as u8 - slot) {
         let name = format!("Bot {}", ["Alpha", "Bravo", "Charlie", "Delta"][i as usize % 4]);
-        commands.spawn((player_bundle(slot, name, true, Owner { client: None }), BotBrain::default()));
+        // Bots take a starter weapon each (variety).
+        let starters: Vec<MainWeapon> = MainWeapon::ALL.into_iter().filter(|w| w.def().starter).collect();
+        let main = starters[i as usize % starters.len()];
+        commands.spawn((
+            player_bundle(slot, name, true, Owner { client: None }, main),
+            super::progress::AutoPool::default(),
+            BotBrain::default(),
+        ));
         slot += 1;
     }
     info!("lobby open ({slot} players including bots)");
 }
 
-fn player_bundle(slot: u8, name: String, is_bot: bool, owner: Owner) -> impl Bundle {
+fn player_bundle(slot: u8, name: String, is_bot: bool, owner: Owner, main: MainWeapon) -> impl Bundle {
     (
         Replicated,
-        Player { slot, name, is_bot },
+        Player { slot, name, is_bot, main },
         owner,
         InputQueue::default(),
         Intent::default(),
@@ -113,10 +124,12 @@ pub fn spawn_point(terrain: &Terrain, slot: u8) -> Vec3 {
 }
 
 /// Components a player needs during a run.
-fn run_components(terrain: &Terrain, slot: u8) -> impl Bundle {
+fn run_components(terrain: &Terrain, slot: u8, main: MainWeapon) -> impl Bundle {
     let stats = PlayerStats::from_inventory(&Inventory::default());
     (
         PlayerState { sim: PlayerSim::spawn_at(spawn_point(terrain, slot)), tick: 0, yaw: 0.0, pitch: 0.0 },
+        Gear(Loadout::new(main)),
+        super::autos::AutoState::default(),
         Health::new(stats.max_hp),
         Wallet::default(),
         Items::default(),
@@ -150,10 +163,18 @@ fn handle_hello(
         let name: String = hello.name.chars().filter(|c| !c.is_control()).take(16).collect();
         let name = if name.trim().is_empty() { format!("Joueur {}", slot + 1) } else { name };
         info!("player '{name}' joined as slot {slot} ({client_id})");
-        let mut entity = commands.spawn(player_bundle(slot, name, false, Owner { client: Some(client_id) }));
+        let main = hello.main;
+        // Only automatic weapons that exist are kept (and at least the starters).
+        let mut pool = super::progress::AutoPool::default();
+        for a in &hello.autos {
+            if !pool.0.contains(a) {
+                pool.0.push(*a);
+            }
+        }
+        let mut entity = commands.spawn((player_bundle(slot, name, false, Owner { client: Some(client_id) }, main), pool));
         // Join in progress: drop the newcomer into the world right away.
         if info.phase == Phase::Playing {
-            entity.insert(run_components(&terrain, slot));
+            entity.insert(run_components(&terrain, slot, main));
         }
         welcome.write(ToClients {
             targets: SendTargets::Single(client_id),
@@ -190,6 +211,15 @@ fn handle_lobby_commands(
         match cmd.message {
             LobbyCommand::Start => commands.run_system_cached(start_match),
             LobbyCommand::BackToLobby => commands.run_system_cached(back_to_lobby),
+        }
+    }
+}
+
+/// A player changes their starting weapon in the lobby.
+fn handle_pick_main(mut picks: MessageReader<FromClient<PickMain>>, mut players: Query<(&Owner, &mut Player)>) {
+    for pick in picks.read() {
+        if let Some((_, mut player)) = players.iter_mut().find(|(o, _)| o.client == Some(pick.client_id)) {
+            player.main = pick.message.0;
         }
     }
 }
@@ -235,7 +265,7 @@ pub fn start_match(
     for (entity, player) in &players {
         commands
             .entity(entity)
-            .insert(run_components(&terrain, player.slot))
+            .insert(run_components(&terrain, player.slot, player.main))
             .insert((PlayerScore::default(), InputQueue::default(), super::progress::LevelUps::default()));
     }
     info!("=== run started (seed {seed}, {} players) ===", players.iter().count());
@@ -248,7 +278,7 @@ pub fn back_to_lobby(mut commands: Commands, mut info: Single<&mut MatchInfo>, p
     }
     commands.run_system_cached(despawn_world_entities);
     for e in &players {
-        commands.entity(e).remove::<(PlayerState, Health, Wallet, Items, PendingChoice)>();
+        commands.entity(e).remove::<(PlayerState, Health, Wallet, Items, PendingChoice, Gear)>();
     }
     info.phase = Phase::Lobby;
     info!("back to lobby");
@@ -257,7 +287,7 @@ pub fn back_to_lobby(mut commands: Commands, mut info: Single<&mut MatchInfo>, p
 /// Despawns monsters, chests and projectiles (the run's world).
 pub fn despawn_world_entities(
     mut commands: Commands,
-    q: Query<Entity, Or<(With<Mob>, With<Chest>, With<Projectile>, With<WeaponPickup>, With<Hazard>, With<Statue>, With<XpGem>)>>,
+    q: Query<Entity, Or<(With<Mob>, With<Chest>, With<Projectile>, With<Hazard>, With<Statue>, With<XpGem>)>>,
 ) {
     for e in &q {
         commands.entity(e).try_despawn();

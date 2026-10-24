@@ -1,5 +1,5 @@
 //! The first-person weapon: model swap on weapon change, recoil, sway,
-//! bob, reload dip, switch animation, muzzle flash.
+//! bob, switch animation, muzzle flash.
 
 use bevy::camera::visibility::RenderLayers;
 use bevy::light::NotShadowCaster;
@@ -13,12 +13,12 @@ use super::ViewModelCamera;
 use crate::net::client::{InputState, PredictedEvents, Prediction};
 use crate::net::protocol::player_color;
 use crate::net::LocalPlayer;
-use crate::shared::weapons::WeaponKind;
+use crate::shared::build::MainWeapon;
 
 /// Root of the weapon model (child of the view model camera).
 #[derive(Component)]
 pub struct WeaponRoot {
-    kind: WeaponKind,
+    kind: MainWeapon,
 }
 
 /// Muzzle flash entity (shown briefly after a shot).
@@ -64,7 +64,7 @@ fn swap_weapon_model(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut vm: ResMut<ViewModelState>,
 ) {
-    let wanted = pred.active.then(|| pred.sim.arsenal.current_kind());
+    let wanted = if pred.active { pred.main } else { None };
     let existing = current.single().ok();
     if existing.map(|(_, w)| w.kind) == wanted {
         return;
@@ -133,9 +133,6 @@ fn react_to_shots(
                 t.rotation = Quat::from_rotation_z(vm.kick * 7.0);
             }
         }
-        if ev.weapons.switched {
-            vm.switch_anim = 1.0;
-        }
         if ev.mv.landed {
             cam_fx.land_dip = 0.12;
         }
@@ -184,8 +181,6 @@ fn animate_weapon(
     let bob_amt = if mv.grounded { (speed / 11.0).min(1.0) } else { 0.0 };
     let bob = Vec3::new((vm.bob).sin() * 0.012, (vm.bob * 2.0).sin().abs() * 0.012, 0.0) * bob_amt;
 
-    let reload = pred.sim.arsenal.reload_left;
-    let reload_dip = if reload > 0.0 { 1.0 } else { 0.0 };
     let aiming = mouse.pressed(MouseButton::Right);
     let base = if aiming { Vec3::new(0.0, -0.11, -0.42) } else { HIP };
     let sliding = if mv.is_sliding() { 1.0 } else { 0.0 };
@@ -193,14 +188,14 @@ fn animate_weapon(
     let target = base
         + bob
         + Vec3::new(-vm.sway.x * 0.1, vm.sway.y * 0.1, vm.kick * 0.07)
-        + Vec3::new(0.0, -0.25 * vm.switch_anim - 0.12 * reload_dip, 0.0)
+        + Vec3::new(0.0, -0.25 * vm.switch_anim, 0.0)
         + Vec3::new(-0.04, -0.03, 0.0) * sliding;
     transform.translation = transform.translation.lerp(target, 1.0 - (-dt * 20.0).exp());
     transform.rotation = Quat::from_euler(
         EulerRot::YXZ,
         vm.sway.x * 0.6,
-        vm.kick * 0.25 + vm.sway.y * 0.4 - reload_dip * 0.5 - vm.switch_anim * 0.8,
-        vm.sway.x * 0.5 + sliding * 0.25 + reload_dip * 0.3,
+        vm.kick * 0.25 + vm.sway.y * 0.4 - vm.switch_anim * 0.8,
+        vm.sway.x * 0.5 + sliding * 0.25,
     );
 
     for (mut flash, mut vis) in &mut flashes {

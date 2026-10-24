@@ -1,5 +1,6 @@
-//! Combat resolution (server): hitscan shots with lag compensation,
-//! projectiles, explosions, damage, deaths and rewards.
+//! Combat resolution (server): main weapon volleys (projectiles that pierce,
+//! bounce, explode or come back; beams; chain lightning), explosions,
+//! damage, deaths and rewards.
 //!
 //! Systems communicate through Bevy *messages* (`DamageMob`, `DamagePlayer`,
 //! `Explode`): the code that decides "something gets hurt" does not need
@@ -18,8 +19,8 @@ use crate::shared::economy::{self, ChestKind};
 use crate::shared::items::PlayerStats;
 use crate::shared::mobs::MobKind;
 use crate::shared::movement::{DT, PLAYER_HEIGHT};
+use crate::shared::build::{Delivery, MainParams};
 use crate::shared::rng::Rng;
-use crate::shared::weapons::{ProjectileType, WeaponKind};
 
 /// Max lag compensation window, in ticks (~330 ms).
 pub const MAX_REWIND_TICKS: u32 = 20;
@@ -103,13 +104,111 @@ impl MobHistory {
 }
 
 /// Server-only data of a projectile.
-#[derive(Component, Debug)]
+#[derive(Component, Debug, Clone)]
 pub struct ProjectileServer {
     pub damage: f32,
     pub splash: f32,
     pub by: Option<Entity>,
     pub hurts_players: bool,
     pub ttl: f32,
+    /// Monsters it can still go through (u32::MAX = all).
+    pub pierce: u32,
+    /// Times it can still jump to another monster after a hit.
+    pub bounces: u32,
+    pub crit_chance: f32,
+    pub crit_mult: f32,
+    /// Monsters already hit (a piercing projectile hurts each one once).
+    pub hit: Vec<Entity>,
+    pub seed: u64,
+    /// Position at the previous tick (hits are swept along the segment, so
+    /// fast bullets cannot tunnel through monsters).
+    pub prev: Option<Vec3>,
+    /// Boomerang: already on its way back.
+    pub returning: bool,
+}
+
+impl ProjectileServer {
+    /// A monster projectile.
+    pub fn enemy(damage: f32, splash: f32, ttl: f32) -> Self {
+        Self {
+            damage,
+            splash,
+            by: None,
+            hurts_players: true,
+            ttl,
+            pierce: 0,
+            bounces: 0,
+            crit_chance: 0.0,
+            crit_mult: 1.0,
+            hit: Vec::new(),
+            seed: 0,
+            prev: None,
+            returning: false,
+        }
+    }
+
+    /// A projectile of a player's weapon.
+    pub fn player(p: &MainParams, by: Entity, ttl: f32, seed: u64) -> Self {
+        Self {
+            damage: p.damage,
+            splash: p.splash,
+            by: Some(by),
+            hurts_players: false,
+            ttl,
+            pierce: p.pierce,
+            bounces: p.bounces,
+            crit_chance: p.crit_chance,
+            crit_mult: p.crit_mult,
+            hit: Vec::new(),
+            seed,
+            prev: None,
+            returning: false,
+        }
+    }
+}
+
+/// The monster query shared by the combat systems.
+type MobQuery<'w, 's> = Query<'w, 's, (Entity, &'static Mob, &'static MobState, &'static MobHistory, &'static Health)>;
+
+fn mob_center(mob: &Mob, state: &MobState) -> Vec3 {
+    state.pos + Vec3::Y * mob.kind.def().height * 0.5
+}
+
+/// Damage of one hit, with a possible critical.
+fn roll_hit(base: f32, crit_chance: f32, crit_mult: f32, rng: &mut Rng) -> (f32, bool) {
+    if rng.chance(crit_chance) { (base * crit_mult, true) } else { (base, false) }
+}
+
+/// Item effects on a direct hit: Tesla coil arcs and unstable explosions.
+#[allow(clippy::too_many_arguments)]
+fn item_procs(
+    stats: &PlayerStats,
+    rng: &mut Rng,
+    target: Entity,
+    at: Vec3,
+    base: f32,
+    by: Entity,
+    mobs: &MobQuery,
+    damage: &mut MessageWriter<DamageMob>,
+    explode: &mut MessageWriter<Explode>,
+    fx: &mut MessageWriter<ToClients<Fx>>,
+) {
+    if rng.chance(stats.tesla_chance) {
+        let mut others: Vec<(Entity, Vec3)> = mobs
+            .iter()
+            .filter(|(e, ..)| *e != target)
+            .map(|(e, m, st, ..)| (e, mob_center(m, st)))
+            .filter(|(_, pos)| pos.distance(at) < 9.0)
+            .collect();
+        others.sort_by(|a, b| a.1.distance(at).total_cmp(&b.1.distance(at)));
+        for (e, pos) in others.into_iter().take(2) {
+            damage.write(DamageMob { target: e, amount: base * 0.6, crit: false, pos, by: Some(by) });
+            fx.write(ToClients { targets: SendTargets::All, message: Fx::Arc { from: at, to: pos } });
+        }
+    }
+    if rng.chance(stats.explode_chance) {
+        explode.write(Explode { pos: at, radius: 3.0, damage: base * 0.6, hurts_players: false, hurts_mobs: true, by: Some(by) });
+    }
 }
 
 pub struct CombatPlugin;
@@ -166,11 +265,12 @@ fn mob_capsule(kind: MobKind, pos: Vec3) -> (Vec3, Vec3, f32) {
     (pos + Vec3::Y * r, pos + Vec3::Y * (d.height - r).max(r), r)
 }
 
+/// Turns the volleys fired this tick into projectiles, beams and chains.
 #[allow(clippy::too_many_arguments)]
 fn resolve_shots(
     mut pending: ResMut<PendingShots>,
     mut commands: Commands,
-    mobs: Query<(Entity, &Mob, &MobState, &MobHistory, &Health)>,
+    mobs: MobQuery,
     terrain: Res<TerrainRes>,
     tick: Res<SimTick>,
     shooters: Query<(&Items, &Health), With<Player>>,
@@ -180,200 +280,254 @@ fn resolve_shots(
 ) {
     for p in pending.0.drain(..) {
         let shot = p.shot;
-        let def = shot.weapon.def();
-        let shooter = shooters.get(p.shooter).ok();
-        let player_stats = shooter.map(|(i, _)| PlayerStats::from_inventory(&i.0));
-        let own_health = shooter.map(|(_, h)| h.hp / h.max.max(1.0)).unwrap_or(1.0);
+        let prm = p.params;
+        let Ok((items, own)) = shooters.get(p.shooter) else { continue };
+        let stats = PlayerStats::from_inventory(&items.0);
+        let own_health = own.hp / own.max.max(1.0);
         let mut rng = Rng::new(shot.seed ^ 0x5EED_CAFE);
-
-        // Projectile weapons spawn an entity instead.
-        if let Some(projectile) = def.projectile {
-            let speed = def.projectile_speed;
-            let kind = match projectile {
-                ProjectileType::Rocket => ProjectileKind::Rocket,
-                ProjectileType::Grenade => ProjectileKind::Grenade,
-                ProjectileType::Plasma => ProjectileKind::Plasma,
-            };
-            commands.spawn((
-                Replicated,
-                Projectile {
-                    kind,
-                    origin: shot.origin + shot.dir * 0.8,
-                    vel: shot.dir * speed,
-                    gravity: def.projectile_gravity,
-                    spawn_tick: tick.0,
-                    owner_slot: p.slot,
-                },
-                ProjectileServer {
-                    damage: shot.damage,
-                    splash: def.splash_radius,
-                    by: Some(p.shooter),
-                    hurts_players: false,
-                    ttl: def.range / speed + 1.0,
-                },
-            ));
-            continue;
-        }
-
-        // Lag compensation: test against monsters where the shooter saw them.
-        let view_tick = p.view_tick.clamp(tick.0.saturating_sub(MAX_REWIND_TICKS), tick.0);
-        let wall = terrain.raycast(shot.origin, shot.dir, def.range).unwrap_or(def.range);
-        let mut best: Option<(Entity, f32)> = None;
-        let mut pierced: Vec<(Entity, f32)> = Vec::new();
-        for (entity, mob, state, history, _) in &mobs {
-            let pos = history.at(view_tick, state.pos);
-            let (a, b, r) = mob_capsule(mob.kind, pos);
-            if let Some(t) = ray_capsule(shot.origin, shot.dir, a, b, r)
-                && t < wall
-            {
-                pierced.push((entity, t));
-                if best.is_none_or(|(_, bt)| t < bt) {
-                    best = Some((entity, t));
-                }
-            }
-        }
-        // Railgun: every monster on the line takes the hit; the beam stops at the wall.
-        if def.pierce {
-            let end = shot.origin + shot.dir * wall;
-            let targets = match p.owner {
-                Some(id) => SendTargets::AllExcept(id),
-                None => SendTargets::All,
-            };
-            fx.write(ToClients { targets, message: Fx::Tracer { slot: p.slot, weapon: shot.weapon, from: shot.origin, to: end } });
-            for (target, t) in pierced {
-                let crit = player_stats.is_some_and(|s| rng.chance(s.crit_chance));
-                let crit_mult = if crit { player_stats.map(|s| s.crit_mult).unwrap_or(2.0) } else { 1.0 };
-                let pos = shot.origin + shot.dir * t;
-                damage.write(DamageMob { target, amount: shot.damage * crit_mult, crit, pos, by: Some(p.shooter) });
-            }
-            continue;
-        }
-
-        let end_dist = best.map(|(_, t)| t).unwrap_or(wall);
-        let end = shot.origin + shot.dir * end_dist;
-        // Tracer for everyone except the shooter (who predicted it locally).
-        let targets = match p.owner {
+        // Everyone but the shooter, who predicted the visual locally.
+        let others = match p.owner {
             Some(id) => SendTargets::AllExcept(id),
             None => SendTargets::All,
         };
-        // Only one tracer per shotgun volley would look wrong: send all, they are tiny.
-        fx.write(ToClients { targets, message: Fx::Tracer { slot: p.slot, weapon: shot.weapon, from: shot.origin, to: end } });
+        let health_of = |e: Entity| mobs.get(e).map(|(.., h)| h.hp / h.max.max(1.0)).unwrap_or(1.0);
 
-        if let Some((target, t)) = best {
-            // Damage falloff for shotgun pellets at long range.
-            let falloff = if shot.weapon == WeaponKind::Shotgun { (1.0 - (t - 10.0).max(0.0) / 40.0).max(0.3) } else { 1.0 };
-            let crit = player_stats.is_some_and(|s| rng.chance(s.crit_chance));
-            let crit_mult = if crit { player_stats.map(|s| s.crit_mult).unwrap_or(2.0) } else { 1.0 };
-            let target_health = mobs.get(target).map(|(.., h)| h.hp / h.max.max(1.0)).unwrap_or(1.0);
-            let conditional = player_stats.map(|s| s.conditional_damage(own_health, target_health)).unwrap_or(1.0);
-            let amount = shot.damage * falloff * crit_mult * conditional;
-            damage.write(DamageMob { target, amount, crit, pos: end, by: Some(p.shooter) });
-            // Tesla coil: an electric arc jumps to the 2 nearest other monsters.
-            if let Some(s) = player_stats
-                && rng.chance(s.tesla_chance)
-            {
-                let mut others: Vec<(Entity, Vec3)> = mobs
-                    .iter()
-                    .filter(|(e, ..)| *e != target)
-                    .map(|(e, m, st, ..)| (e, st.pos + Vec3::Y * m.kind.def().height * 0.5))
-                    .filter(|(_, pos)| pos.distance(end) < 9.0)
-                    .collect();
-                others.sort_by(|a, b| a.1.distance(end).total_cmp(&b.1.distance(end)));
-                for (e, pos) in others.into_iter().take(2) {
-                    damage.write(DamageMob { target: e, amount: shot.damage * 0.6, crit: false, pos, by: Some(p.shooter) });
-                    fx.write(ToClients { targets: SendTargets::All, message: Fx::Arc { from: end, to: pos } });
+        match prm.delivery {
+            Delivery::Projectile | Delivery::Boomerang => {
+                let kind = ProjectileKind::of_main(prm.kind);
+                let origin = shot.origin + shot.dir * 0.6 + Vec3::NEG_Y * 0.15;
+                let (vel, life, ttl) = if prm.delivery == Delivery::Boomerang {
+                    // `speed` is a multiplier of the round-trip pace.
+                    let life = 1.3 / prm.speed.max(0.2);
+                    (shot.dir * prm.range, life, life)
+                } else {
+                    (shot.dir * prm.speed, 0.0, prm.range / prm.speed.max(1.0))
+                };
+                commands.spawn((
+                    Replicated,
+                    Projectile {
+                        kind,
+                        origin,
+                        vel,
+                        gravity: prm.gravity,
+                        spawn_tick: tick.0,
+                        owner_slot: p.slot,
+                        size: prm.size,
+                        life,
+                    },
+                    ProjectileServer::player(&prm, p.shooter, ttl, shot.seed),
+                ));
+            }
+            Delivery::Beam => {
+                // Lag compensation: test against monsters where the shooter saw them.
+                let view_tick = p.view_tick.clamp(tick.0.saturating_sub(MAX_REWIND_TICKS), tick.0);
+                let wall = terrain.raycast(shot.origin, shot.dir, prm.range).unwrap_or(prm.range);
+                fx.write(ToClients {
+                    targets: others,
+                    message: Fx::Tracer { slot: p.slot, weapon: prm.kind, from: shot.origin, to: shot.origin + shot.dir * wall, size: prm.size },
+                });
+                for (entity, mob, state, history, _) in &mobs {
+                    let (a, b, r) = mob_capsule(mob.kind, history.at(view_tick, state.pos));
+                    if let Some(t) = ray_capsule(shot.origin, shot.dir, a, b, r + prm.size * 0.5)
+                        && t < wall
+                    {
+                        let pos = shot.origin + shot.dir * t;
+                        let (amount, crit) = roll_hit(prm.damage, prm.crit_chance, prm.crit_mult, &mut rng);
+                        let amount = amount * stats.conditional_damage(own_health, health_of(entity));
+                        damage.write(DamageMob { target: entity, amount, crit, pos, by: Some(p.shooter) });
+                    }
                 }
             }
-            if let Some(s) = player_stats
-                && rng.chance(s.explode_chance)
-            {
-                explode.write(Explode {
-                    pos: end,
-                    radius: 3.0,
-                    damage: shot.damage * 0.6,
-                    hurts_players: false,
-                    hurts_mobs: true,
-                    by: Some(p.shooter),
-                });
+            Delivery::Chain => {
+                let view_tick = p.view_tick.clamp(tick.0.saturating_sub(MAX_REWIND_TICKS), tick.0);
+                let wall = terrain.raycast(shot.origin, shot.dir, prm.range).unwrap_or(prm.range);
+                // First target: on the aim line, or the monster closest to it
+                // (a little aim assist: lightning "seeks" its target).
+                let mut first: Option<(Entity, f32)> = None;
+                for (entity, mob, state, history, _) in &mobs {
+                    let pos = history.at(view_tick, state.pos);
+                    let center = pos + Vec3::Y * mob.kind.def().height * 0.5;
+                    let to = center - shot.origin;
+                    let dist = to.length();
+                    if dist > wall.max(4.0) + 1.0 || dist < 0.1 {
+                        continue;
+                    }
+                    let angle = to.angle_between(shot.dir);
+                    let (a, b, r) = mob_capsule(mob.kind, pos);
+                    let on_line = ray_capsule(shot.origin, shot.dir, a, b, r + prm.size * 0.4).is_some();
+                    let score = if on_line { 0.0 } else { angle };
+                    if (on_line || angle < 0.14) && first.is_none_or(|(_, s)| score < s) {
+                        first = Some((entity, score));
+                    }
+                }
+                let Some((mut target, _)) = first else {
+                    let to = shot.origin + shot.dir * wall.min(12.0);
+                    fx.write(ToClients { targets: SendTargets::All, message: Fx::Arc { from: shot.origin + Vec3::NEG_Y * 0.3, to } });
+                    continue;
+                };
+                let mut from = shot.origin + Vec3::NEG_Y * 0.3;
+                let mut hit = vec![target];
+                let reach = 8.0 * prm.size.max(0.3);
+                for jump in 0..=prm.bounces {
+                    let Ok((_, mob, state, ..)) = mobs.get(target) else { break };
+                    let at = mob_center(mob, state);
+                    fx.write(ToClients { targets: SendTargets::All, message: Fx::Arc { from, to: at } });
+                    let (amount, crit) = roll_hit(prm.damage, prm.crit_chance, prm.crit_mult, &mut rng);
+                    let amount = amount * stats.conditional_damage(own_health, health_of(target));
+                    damage.write(DamageMob { target, amount, crit, pos: at, by: Some(p.shooter) });
+                    if jump == 0 {
+                        item_procs(&stats, &mut rng, target, at, prm.damage, p.shooter, &mobs, &mut damage, &mut explode, &mut fx);
+                    }
+                    // Next: the nearest monster not hit yet.
+                    let next = mobs
+                        .iter()
+                        .filter(|(e, ..)| !hit.contains(e))
+                        .map(|(e, m, st, ..)| (e, mob_center(m, st).distance(at)))
+                        .filter(|(_, d)| *d < reach)
+                        .min_by(|a, b| a.1.total_cmp(&b.1));
+                    let Some((n, _)) = next else { break };
+                    hit.push(n);
+                    from = at;
+                    target = n;
+                }
             }
         }
     }
+}
+
+/// Is `pos` inside a solid block or under the ground?
+fn in_terrain(terrain: &TerrainRes, pos: Vec3) -> bool {
+    if pos.y <= terrain.wgen.ground_height(pos.x, pos.z) {
+        return true;
+    }
+    let mut solid = false;
+    terrain.cache.for_each_solid_near(pos, |s| {
+        let (bottom, top) = s.y_range();
+        if !solid && pos.y >= bottom && pos.y <= top && s.push_out_xz(Vec2::new(pos.x, pos.z), 0.15).is_some() {
+            solid = true;
+        }
+    });
+    solid
 }
 
 #[allow(clippy::too_many_arguments)]
 fn update_projectiles(
     mut commands: Commands,
     mut projectiles: Query<(Entity, &Projectile, &mut ProjectileServer)>,
-    mobs: Query<(Entity, &Mob, &MobState)>,
+    mobs: MobQuery,
     players: Query<(Entity, &PlayerState, &Health)>,
+    shooters: Query<(&Items, &Health), With<Player>>,
     terrain: Res<TerrainRes>,
     tick: Res<SimTick>,
     mut damage_mob: MessageWriter<DamageMob>,
     mut damage_player: MessageWriter<DamagePlayer>,
     mut explode: MessageWriter<Explode>,
+    mut fx: MessageWriter<ToClients<Fx>>,
 ) {
     for (entity, proj, mut data) in &mut projectiles {
         data.ttl -= DT;
-        let pos = proj.pos_at(f64::from(tick.0));
-        let ground = terrain.wgen.ground_height(pos.x, pos.z);
-        let mut solid_hit = false;
-        terrain.cache.for_each_solid_near(pos, |s| {
-            let (bottom, top) = s.y_range();
-            if !solid_hit && pos.y >= bottom && pos.y <= top && s.push_out_xz(Vec2::new(pos.x, pos.z), 0.15).is_some() {
-                solid_hit = true;
-            }
-        });
-        let mut hit = solid_hit || pos.y <= ground || data.ttl <= 0.0;
+        let now = f64::from(tick.0);
+        let pos = proj.pos_at(now);
+        let prev = data.prev.unwrap_or_else(|| proj.pos_at((now - 1.0).max(f64::from(proj.spawn_tick))));
+        data.prev = Some(pos);
+        let blocked = !proj.kind.ghostly() && in_terrain(&terrain, pos);
 
-        let radius = match proj.kind {
-            ProjectileKind::BossOrb => 0.9,
-            ProjectileKind::Rocket | ProjectileKind::Grenade => 0.4,
-            _ => 0.35,
-        };
-        let mut direct: Option<Entity> = None;
+        // --- Monster projectiles: simple contact test against players ---
         if data.hurts_players {
+            let mut direct: Option<Entity> = None;
             for (pe, ps, health) in &players {
-                if health.downed {
-                    continue;
-                }
                 let center = ps.sim.mv.pos + Vec3::Y * (PLAYER_HEIGHT * 0.5);
-                if (pos - center).length() < radius + 0.6 {
+                if !health.downed && (pos - center).length() < proj.size + 0.6 {
                     direct = Some(pe);
-                    hit = true;
                     break;
                 }
             }
-        } else {
-            for (me, mob, ms) in &mobs {
-                let (a, b, r) = mob_capsule(mob.kind, ms.pos);
-                let closest = a + (b - a) * ((pos - a).dot(b - a) / (b - a).length_squared().max(1e-4)).clamp(0.0, 1.0);
-                if closest.distance(pos) < r + radius {
-                    direct = Some(me);
-                    hit = true;
-                    break;
-                }
+            if direct.is_none() && !blocked && data.ttl > 0.0 {
+                continue;
             }
-        }
-
-        if !hit {
+            commands.entity(entity).try_despawn();
+            if data.splash > 0.0 {
+                explode.write(Explode { pos, radius: data.splash, damage: data.damage, hurts_players: true, hurts_mobs: false, by: None });
+            } else if let Some(target) = direct {
+                damage_player.write(DamagePlayer { target, amount: data.damage, attacker: None });
+            }
             continue;
         }
-        commands.entity(entity).try_despawn();
-        if data.splash > 0.0 {
-            explode.write(Explode {
-                pos,
-                radius: data.splash,
-                damage: data.damage,
-                hurts_players: data.hurts_players,
-                hurts_mobs: !data.hurts_players,
-                by: data.by,
-            });
-        } else if let Some(target) = direct {
-            if data.hurts_players {
-                damage_player.write(DamagePlayer { target, amount: data.damage, attacker: None });
-            } else {
-                damage_mob.write(DamageMob { target, amount: data.damage, crit: false, pos, by: data.by });
+
+        // --- Player projectiles: swept test along this tick's segment ---
+        if proj.kind == ProjectileKind::Banana && !data.returning && proj.age(now) > proj.life * 0.5 {
+            // On the way back it can hit everything once more.
+            data.returning = true;
+            data.hit.clear();
+        }
+        let seg = pos - prev;
+        let len = seg.length();
+        let dir = if len > 1e-4 { seg / len } else { Vec3::Y };
+        let mut hits: Vec<(f32, Entity)> = mobs
+            .iter()
+            .filter(|(e, ..)| !data.hit.contains(e))
+            .filter_map(|(e, mob, state, ..)| {
+                let (a, b, r) = mob_capsule(mob.kind, state.pos);
+                ray_capsule(prev, dir, a, b, r + proj.size).filter(|t| *t <= len.max(proj.size)).map(|t| (t, e))
+            })
+            .collect();
+        hits.sort_by(|a, b| a.0.total_cmp(&b.0));
+
+        let by = data.by;
+        let shooter = by.and_then(|b| shooters.get(b).ok());
+        let stats = shooter.map(|(i, _)| PlayerStats::from_inventory(&i.0));
+        let own_health = shooter.map(|(_, h)| h.hp / h.max.max(1.0)).unwrap_or(1.0);
+        let mut rng = Rng::new(data.seed ^ u64::from(tick.0));
+        let mut done = false;
+        for (t, target) in hits {
+            let at = prev + dir * t;
+            data.hit.push(target);
+            if data.splash > 0.0 {
+                explode.write(Explode { pos: at, radius: data.splash, damage: data.damage, hurts_players: false, hurts_mobs: true, by });
+                done = true;
+                break;
             }
+            let target_health = mobs.get(target).map(|(.., h)| h.hp / h.max.max(1.0)).unwrap_or(1.0);
+            let (amount, crit) = roll_hit(data.damage, data.crit_chance, data.crit_mult, &mut rng);
+            let amount = amount * stats.map(|s| s.conditional_damage(own_health, target_health)).unwrap_or(1.0);
+            damage_mob.write(DamageMob { target, amount, crit, pos: at, by });
+            if let (Some(s), Some(b)) = (stats.as_ref(), by) {
+                item_procs(s, &mut rng, target, at, data.damage, b, &mobs, &mut damage_mob, &mut explode, &mut fx);
+            }
+            if data.bounces > 0 {
+                // Ricochet toward the nearest monster not hit yet.
+                let next = mobs
+                    .iter()
+                    .filter(|(e, ..)| !data.hit.contains(e))
+                    .map(|(_, m, st, ..)| mob_center(m, st))
+                    .filter(|c| c.distance(at) < 18.0)
+                    .min_by(|a, b| a.distance(at).total_cmp(&b.distance(at)));
+                if let Some(c) = next {
+                    let speed = proj.vel.length().max(20.0);
+                    let mut bounced = data.clone();
+                    bounced.bounces -= 1;
+                    bounced.prev = None;
+                    bounced.ttl = 1.0;
+                    commands.spawn((
+                        Replicated,
+                        Projectile { origin: at, vel: (c - at).normalize_or_zero() * speed, gravity: 0.0, spawn_tick: tick.0, ..*proj },
+                        bounced,
+                    ));
+                }
+                done = true;
+                break;
+            }
+            if data.pierce == 0 {
+                done = true;
+                break;
+            }
+            data.pierce = data.pierce.saturating_sub(1);
+        }
+        if done || blocked || data.ttl <= 0.0 {
+            if !done && blocked && data.splash > 0.0 {
+                explode.write(Explode { pos, radius: data.splash, damage: data.damage, hurts_players: false, hurts_mobs: true, by });
+            }
+            commands.entity(entity).try_despawn();
         }
     }
 }
@@ -393,6 +547,8 @@ fn update_hazards(
     for (entity, hazard, mut data) in &mut hazards {
         let age = tick.0.saturating_sub(hazard.spawn_tick) as f32 * DT;
         match hazard.kind {
+            // Player weapons: see `autos.rs`.
+            HazardKind::Mine | HazardKind::Poison | HazardKind::Fire | HazardKind::Tornado => {}
             HazardKind::Shockwave => {
                 let radius = age * SHOCKWAVE_SPEED;
                 if radius > SHOCKWAVE_MAX_RADIUS {

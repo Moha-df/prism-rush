@@ -13,7 +13,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 
 use crate::shared::items::ItemKind;
-use crate::shared::weapons::WeaponKind;
+use crate::shared::build::{AutoWeapon, MainWeapon, Tome};
 
 const SIZE: usize = 64;
 const SS: usize = 4; // samples per axis
@@ -449,47 +449,142 @@ pub fn paint_item(item: ItemKind) -> Canvas {
     c
 }
 
-/// Draws a weapon silhouette (barrel to the right).
-pub fn paint_weapon(kind: WeaponKind) -> Canvas {
+/// Draws a main weapon (pointing to the upper right or to the right).
+pub fn paint_main(kind: MainWeapon) -> Canvas {
     let mut c = Canvas::default();
     let m = DARK_GREY;
     let l = GREY;
     match kind {
-        WeaponKind::Pistol => {
-            c.rect(14.0, 22.0, 50.0, 32.0, l).poly(&[(16.0, 30.0), (28.0, 30.0), (24.0, 50.0), (12.0, 50.0)], m);
+        MainWeapon::FireStaff => {
+            c.line((10.0, 56.0), (44.0, 22.0), 5.0, BROWN).circle((48.0, 16.0), 11.0, ORANGE).circle((48.0, 16.0), 6.0, YELLOW);
         }
-        WeaponKind::Smg => {
-            c.rect(10.0, 24.0, 48.0, 34.0, m).rect(48.0, 27.0, 58.0, 31.0, l).rect(28.0, 34.0, 34.0, 52.0, l).poly(&[(14.0, 34.0), (22.0, 34.0), (18.0, 46.0), (10.0, 46.0)], m);
+        MainWeapon::LightningStaff => {
+            c.line((10.0, 56.0), (42.0, 24.0), 5.0, l).poly(&[(48.0, 4.0), (58.0, 16.0), (48.0, 30.0), (38.0, 16.0)], CYAN).bolt(44.0, 10.0, 0.5, WHITE);
         }
-        WeaponKind::Shotgun => {
-            c.rect(6.0, 26.0, 58.0, 31.0, m).rect(6.0, 32.0, 58.0, 36.0, m).rect(26.0, 36.0, 40.0, 42.0, BROWN).poly(&[(4.0, 30.0), (14.0, 30.0), (10.0, 46.0), (0.0, 44.0)], BROWN);
+        MainWeapon::Bow => {
+            c.path(&[(18.0, 6.0), (34.0, 14.0), (42.0, 32.0), (34.0, 50.0), (18.0, 58.0)], 5.0, BROWN)
+                .line((18.0, 6.0), (18.0, 58.0), 1.5, BEIGE)
+                .line((8.0, 32.0), (58.0, 32.0), 2.5, BEIGE)
+                .poly(&[(58.0, 32.0), (50.0, 27.0), (50.0, 37.0)], l);
         }
-        WeaponKind::AssaultRifle => {
-            c.rect(6.0, 24.0, 50.0, 34.0, m).rect(50.0, 27.0, 62.0, 31.0, l).poly(&[(28.0, 34.0), (35.0, 34.0), (38.0, 50.0), (31.0, 50.0)], l).rect(18.0, 18.0, 32.0, 24.0, l).rect(0.0, 26.0, 8.0, 38.0, m);
-        }
-        WeaponKind::Sniper => {
-            c.rect(4.0, 28.0, 62.0, 32.0, m).rect(18.0, 18.0, 40.0, 24.0, l).circle((40.0, 21.0), 3.0, CYAN).rect(0.0, 28.0, 14.0, 38.0, m).rect(26.0, 32.0, 30.0, 44.0, l);
-        }
-        WeaponKind::RocketLauncher => {
-            c.rect(4.0, 22.0, 52.0, 36.0, rgb(0.22, 0.35, 0.22)).poly(&[(52.0, 24.0), (62.0, 29.0), (52.0, 34.0)], ORANGE).rect(24.0, 36.0, 30.0, 48.0, m);
-        }
-        WeaponKind::Revolver => {
+        MainWeapon::Revolver => {
             c.rect(20.0, 22.0, 54.0, 28.0, l).circle((24.0, 30.0), 7.0, m).poly(&[(16.0, 30.0), (24.0, 32.0), (20.0, 52.0), (10.0, 50.0)], BROWN);
         }
-        WeaponKind::BurstRifle => {
-            c.rect(6.0, 24.0, 52.0, 34.0, l).rect(52.0, 27.0, 62.0, 31.0, m).rect(26.0, 34.0, 32.0, 48.0, m).rect(40.0, 20.0, 46.0, 24.0, BLUE).rect(0.0, 26.0, 8.0, 36.0, l);
+        MainWeapon::Shotgun => {
+            c.rect(6.0, 26.0, 58.0, 31.0, m).rect(6.0, 32.0, 58.0, 36.0, m).rect(26.0, 36.0, 40.0, 42.0, BROWN).poly(&[(4.0, 30.0), (14.0, 30.0), (10.0, 46.0), (0.0, 44.0)], BROWN);
         }
-        WeaponKind::Minigun => {
-            c.rect(4.0, 20.0, 40.0, 40.0, m).rect(40.0, 22.0, 62.0, 26.0, l).rect(40.0, 28.0, 62.0, 32.0, l).rect(40.0, 34.0, 62.0, 38.0, l).rect(12.0, 40.0, 20.0, 52.0, m);
+        MainWeapon::Sniper => {
+            c.rect(4.0, 28.0, 62.0, 32.0, m).rect(18.0, 18.0, 40.0, 24.0, l).circle((40.0, 21.0), 3.0, CYAN).rect(0.0, 28.0, 14.0, 38.0, m).rect(26.0, 32.0, 30.0, 44.0, l);
         }
-        WeaponKind::GrenadeLauncher => {
-            c.rect(8.0, 26.0, 50.0, 36.0, rgb(0.3, 0.32, 0.2)).circle((30.0, 31.0), 9.0, m).rect(50.0, 28.0, 58.0, 34.0, m).poly(&[(10.0, 36.0), (18.0, 36.0), (14.0, 50.0), (6.0, 50.0)], m);
+        MainWeapon::Bananarang => {
+            c.path(&[(10.0, 20.0), (22.0, 40.0), (40.0, 48.0), (56.0, 42.0)], 10.0, YELLOW).circle((10.0, 20.0), 4.0, BROWN).circle((56.0, 42.0), 4.0, BROWN);
         }
-        WeaponKind::Railgun => {
-            c.rect(4.0, 26.0, 60.0, 34.0, m).rect(14.0, 22.0, 56.0, 25.0, CYAN).rect(14.0, 35.0, 56.0, 38.0, CYAN).rect(0.0, 28.0, 8.0, 40.0, l);
+        MainWeapon::HeroSword => {
+            c.poly(&[(52.0, 6.0), (58.0, 12.0), (24.0, 46.0), (18.0, 40.0)], rgb(0.85, 0.9, 1.0))
+                .line((14.0, 36.0), (28.0, 50.0), 5.0, GOLD)
+                .line((20.0, 44.0), (8.0, 56.0), 5.0, BROWN)
+                .line((50.0, 10.0), (26.0, 34.0), 1.5, CYAN);
         }
-        WeaponKind::PlasmaRifle => {
-            c.rounded(6.0, 22.0, 52.0, 38.0, 6.0, PURPLE).circle((54.0, 30.0), 6.0, PINK).rect(22.0, 38.0, 28.0, 50.0, m).circle((24.0, 30.0), 4.0, CYAN);
+    }
+    c.outline(INK, 2);
+    c
+}
+
+/// Draws an automatic weapon.
+pub fn paint_auto(kind: AutoWeapon) -> Canvas {
+    let mut c = Canvas::default();
+    match kind {
+        AutoWeapon::Aura => {
+            c.circle((32.0, 32.0), 26.0, rgb(0.5, 0.2, 0.9)).circle((32.0, 32.0), 19.0, PURPLE).ring((32.0, 32.0), 26.0, 3.0, PINK).circle((32.0, 32.0), 7.0, WHITE);
+        }
+        AutoWeapon::Lightning => {
+            c.ellipse((32.0, 14.0), 24.0, 10.0, GREY).bolt(20.0, 18.0, 1.4, YELLOW);
+        }
+        AutoWeapon::Orbs => {
+            c.ring((32.0, 32.0), 20.0, 2.0, CYAN).circle((32.0, 12.0), 8.0, CYAN).circle((14.0, 42.0), 8.0, CYAN).circle((50.0, 42.0), 8.0, CYAN).circle((32.0, 32.0), 5.0, WHITE);
+        }
+        AutoWeapon::Axes => {
+            c.line((16.0, 54.0), (44.0, 14.0), 5.0, BROWN).poly(&[(36.0, 10.0), (58.0, 14.0), (52.0, 34.0), (40.0, 22.0)], GREY);
+        }
+        AutoWeapon::Mines => {
+            c.ellipse((32.0, 40.0), 24.0, 12.0, DARK_GREY).ellipse((32.0, 36.0), 18.0, 8.0, GREY).circle((32.0, 32.0), 5.0, RED);
+        }
+        AutoWeapon::Tornado => {
+            c.poly(&[(10.0, 10.0), (54.0, 10.0), (36.0, 56.0), (28.0, 56.0)], rgb(0.75, 0.8, 0.85))
+                .line((14.0, 20.0), (50.0, 20.0), 3.0, WHITE)
+                .line((20.0, 34.0), (44.0, 34.0), 3.0, WHITE)
+                .line((26.0, 46.0), (38.0, 46.0), 3.0, WHITE);
+        }
+        AutoWeapon::Poison => {
+            c.ellipse((32.0, 48.0), 26.0, 10.0, GREEN).rounded(24.0, 6.0, 40.0, 16.0, 2.0, BROWN).circle((32.0, 30.0), 14.0, rgb(0.4, 0.9, 0.2)).circle((28.0, 26.0), 4.0, WHITE);
+        }
+        AutoWeapon::FireTrail => {
+            c.poly(&[(14.0, 56.0), (20.0, 24.0), (28.0, 40.0), (34.0, 8.0), (42.0, 34.0), (48.0, 22.0), (52.0, 56.0)], ORANGE)
+                .poly(&[(24.0, 56.0), (30.0, 36.0), (36.0, 48.0), (42.0, 56.0)], YELLOW);
+        }
+    }
+    c.outline(INK, 2);
+    c
+}
+
+/// Draws a tome: a book whose cover shows what it improves.
+pub fn paint_tome(t: Tome) -> Canvas {
+    let mut c = Canvas::default();
+    let cover = match t {
+        Tome::Damage | Tome::Precision => RED,
+        Tome::Cooldown | Tome::ProjectileSpeed | Tome::Agility => BLUE,
+        Tome::Quantity | Tome::Size | Tome::Duration => PURPLE,
+        Tome::Health | Tome::Regen | Tome::Armor => GREEN,
+        Tome::Luck | Tome::Gold => GOLD,
+        Tome::Experience | Tome::Attraction => CYAN,
+    };
+    c.rounded(10.0, 6.0, 54.0, 58.0, 4.0, cover).rect(10.0, 6.0, 16.0, 58.0, DARK_GREY).rect(48.0, 10.0, 52.0, 56.0, BEIGE);
+    let s = (32.0, 32.0);
+    match t {
+        Tome::Damage => {
+            c.line((22.0, 44.0), (42.0, 18.0), 4.0, WHITE).line((20.0, 36.0), (30.0, 46.0), 3.0, GOLD);
+        }
+        Tome::Cooldown => {
+            c.ring(s, 12.0, 3.0, WHITE).line(s, (32.0, 24.0), 2.5, WHITE).line(s, (38.0, 34.0), 2.5, WHITE);
+        }
+        Tome::Quantity => {
+            c.circle((24.0, 38.0), 5.0, WHITE).circle((40.0, 38.0), 5.0, WHITE).circle((32.0, 24.0), 5.0, WHITE);
+        }
+        Tome::Size => {
+            c.circle(s, 13.0, WHITE).circle(s, 6.0, cover);
+        }
+        Tome::ProjectileSpeed => {
+            c.line((20.0, 24.0), (44.0, 24.0), 3.0, WHITE).line((20.0, 32.0), (44.0, 32.0), 3.0, WHITE).line((20.0, 40.0), (44.0, 40.0), 3.0, WHITE).poly(&[(44.0, 18.0), (50.0, 32.0), (44.0, 46.0)], WHITE);
+        }
+        Tome::Duration => {
+            c.poly(&[(22.0, 18.0), (42.0, 18.0), (32.0, 32.0)], WHITE).poly(&[(32.0, 32.0), (42.0, 46.0), (22.0, 46.0)], WHITE);
+        }
+        Tome::Health => {
+            c.heart(s, 1.0, RED);
+        }
+        Tome::Regen => {
+            c.heart(s, 1.0, RED).rect(29.0, 22.0, 35.0, 40.0, WHITE).rect(23.0, 28.0, 41.0, 34.0, WHITE);
+        }
+        Tome::Armor => {
+            c.poly(&[(20.0, 18.0), (44.0, 18.0), (44.0, 32.0), (32.0, 48.0), (20.0, 32.0)], GREY);
+        }
+        Tome::Agility => {
+            c.bolt(22.0, 16.0, 1.0, YELLOW);
+        }
+        Tome::Luck => {
+            c.circle((26.0, 28.0), 7.0, GREEN).circle((38.0, 28.0), 7.0, GREEN).circle((32.0, 38.0), 7.0, GREEN).line((32.0, 40.0), (34.0, 50.0), 2.0, DARK_GREEN);
+        }
+        Tome::Experience => {
+            c.poly(&[(32.0, 16.0), (44.0, 30.0), (32.0, 48.0), (20.0, 30.0)], WHITE).poly(&[(32.0, 20.0), (40.0, 30.0), (32.0, 42.0), (24.0, 30.0)], CYAN);
+        }
+        Tome::Gold => {
+            c.circle(s, 12.0, YELLOW).circle(s, 8.0, GOLD);
+        }
+        Tome::Attraction => {
+            c.ring((32.0, 30.0), 11.0, 6.0, RED).rect(18.0, 30.0, 26.0, 44.0, RED).rect(38.0, 30.0, 46.0, 44.0, RED).rect(18.0, 40.0, 26.0, 46.0, WHITE).rect(38.0, 40.0, 46.0, 46.0, WHITE).rect(20.0, 26.0, 44.0, 32.0, cover);
+        }
+        Tome::Precision => {
+            c.ring(s, 12.0, 2.5, WHITE).line((32.0, 14.0), (32.0, 50.0), 2.0, WHITE).line((14.0, 32.0), (50.0, 32.0), 2.0, WHITE).circle(s, 3.0, WHITE);
         }
     }
     c.outline(INK, 2);
@@ -500,15 +595,23 @@ pub fn paint_weapon(kind: WeaponKind) -> Canvas {
 #[derive(Resource, Default)]
 pub struct Icons {
     pub items: HashMap<ItemKind, Handle<Image>>,
-    pub weapons: HashMap<WeaponKind, Handle<Image>>,
+    pub mains: HashMap<MainWeapon, Handle<Image>>,
+    pub autos: HashMap<AutoWeapon, Handle<Image>>,
+    pub tomes: HashMap<Tome, Handle<Image>>,
 }
 
 pub fn build_icons(mut icons: ResMut<Icons>, mut images: ResMut<Assets<Image>>) {
     for item in ItemKind::ALL {
         icons.items.insert(item, images.add(paint_item(item).to_image()));
     }
-    for w in WeaponKind::ALL {
-        icons.weapons.insert(w, images.add(paint_weapon(w).to_image()));
+    for w in MainWeapon::ALL {
+        icons.mains.insert(w, images.add(paint_main(w).to_image()));
+    }
+    for a in AutoWeapon::ALL {
+        icons.autos.insert(a, images.add(paint_auto(a).to_image()));
+    }
+    for t in Tome::ALL {
+        icons.tomes.insert(t, images.add(paint_tome(t).to_image()));
     }
 }
 
@@ -530,6 +633,15 @@ mod tests {
             let c = paint_item(item);
             let covered = c.px.iter().filter(|p| p[3] > 0.5).count();
             assert!(covered > 200, "{item:?}: only {covered} pixels");
+        }
+        let canvases = MainWeapon::ALL
+            .into_iter()
+            .map(paint_main)
+            .chain(AutoWeapon::ALL.into_iter().map(paint_auto))
+            .chain(Tome::ALL.into_iter().map(paint_tome));
+        for (i, c) in canvases.enumerate() {
+            let covered = c.px.iter().filter(|p| p[3] > 0.5).count();
+            assert!(covered > 200, "icon {i}: only {covered} pixels");
         }
     }
 }

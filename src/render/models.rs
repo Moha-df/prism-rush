@@ -19,7 +19,7 @@ use super::palette::*;
 use crate::net::protocol::ProjectileKind;
 use crate::shared::economy::ChestKind;
 use crate::shared::mobs::MobKind;
-use crate::shared::weapons::WeaponKind;
+use crate::shared::build::{AutoWeapon, MainWeapon};
 use crate::shared::worldgen::{Decor, DecorKind, Shape, Solid, SolidKind};
 
 // ---------------------------------------------------------------------------
@@ -630,42 +630,66 @@ fn chest_body(kind: ChestKind) -> Part {
 // ---------------------------------------------------------------------------
 
 /// Muzzle position relative to the weapon origin.
-pub fn muzzle(kind: WeaponKind) -> Vec3 {
+pub fn muzzle(kind: MainWeapon) -> Vec3 {
     match kind {
-        WeaponKind::Pistol => Vec3::new(0.0, 0.03, -0.32),
-        WeaponKind::Smg => Vec3::new(0.0, 0.03, -0.44),
-        WeaponKind::Shotgun => Vec3::new(0.0, 0.04, -0.6),
-        WeaponKind::AssaultRifle => Vec3::new(0.0, 0.04, -0.62),
-        WeaponKind::Sniper => Vec3::new(0.0, 0.04, -0.92),
-        WeaponKind::RocketLauncher => Vec3::new(0.0, 0.07, -0.64),
-        WeaponKind::Revolver => Vec3::new(0.0, 0.05, -0.4),
-        WeaponKind::BurstRifle => Vec3::new(0.0, 0.04, -0.6),
-        WeaponKind::Minigun => Vec3::new(0.0, 0.0, -0.75),
-        WeaponKind::GrenadeLauncher => Vec3::new(0.0, 0.05, -0.5),
-        WeaponKind::Railgun => Vec3::new(0.0, 0.04, -0.85),
-        WeaponKind::PlasmaRifle => Vec3::new(0.0, 0.04, -0.6),
+        MainWeapon::FireStaff => Vec3::new(0.0, 0.1, -0.72),
+        MainWeapon::Bow => Vec3::new(0.0, 0.0, -0.2),
+        MainWeapon::Revolver => Vec3::new(0.0, 0.05, -0.4),
+        MainWeapon::Shotgun => Vec3::new(0.0, 0.04, -0.6),
+        MainWeapon::Sniper => Vec3::new(0.0, 0.04, -0.92),
+        MainWeapon::LightningStaff => Vec3::new(0.0, 0.1, -0.72),
+        MainWeapon::Bananarang => Vec3::new(0.0, 0.05, -0.25),
+        MainWeapon::HeroSword => Vec3::new(0.0, 0.05, -0.8),
     }
 }
 
-pub fn weapon(kind: WeaponKind, accent: Color) -> Part {
+/// A magic staff held forward, with a glowing head.
+fn staff(head: Part, ring: Color) -> Part {
+    Part::pivot()
+        .with(Part::cylinder(0.05, 0.85).at(0.0, -0.02, -0.25).rot_x(80.0).color(WOOD_DARK))
+        .with(Part::torus(0.11, 0.025).at(0.0, 0.07, -0.6).rot_x(80.0).color(ring).glow(3.0).tag(AnimTag::Recoil))
+        .with(head.at(0.0, 0.1, -0.72))
+}
+
+pub fn weapon(kind: MainWeapon, accent: Color) -> Part {
     let grip = Part::cube(0.07, 0.17, 0.09).at(0.0, -0.08, 0.03).rot_x(-15.0).color(METAL_DARK);
     match kind {
-        WeaponKind::Pistol => Part::pivot()
-            .with(grip)
-            .with(Part::cube(0.08, 0.09, 0.28).at(0.0, 0.02, -0.08).color(METAL_DARK))
-            .with(Part::cube(0.085, 0.05, 0.3).at(0.0, 0.075, -0.09).color(METAL_LIGHT).tag(AnimTag::Recoil))
-            .with(Part::cylinder(0.045, 0.1).at(0.0, 0.03, -0.26).rot_x(90.0).color(METAL_DARK))
-            .with(Part::cube(0.02, 0.02, 0.03).at(0.0, 0.11, -0.21).color(accent).glow(4.0))
-            .with(Part::cube(0.086, 0.015, 0.2).at(0.0, 0.0, -0.08).color(accent).glow(2.0)),
-        WeaponKind::Smg => Part::pivot()
-            .with(grip)
-            .with(Part::cube(0.1, 0.12, 0.38).at(0.0, 0.03, -0.1).color(METAL_DARK))
-            .with(Part::cube(0.06, 0.24, 0.08).at(0.0, -0.12, -0.14).color(METAL_LIGHT))
-            .with(Part::cylinder(0.05, 0.16).at(0.0, 0.03, -0.36).rot_x(90.0).color(METAL_DARK))
-            .with(Part::cube(0.05, 0.05, 0.22).at(0.0, 0.0, 0.17).color(METAL_LIGHT))
-            .with(Part::cube(0.102, 0.02, 0.3).at(0.0, 0.07, -0.1).color(accent).glow(2.5))
-            .with(Part::cube(0.04, 0.05, 0.1).at(0.0, 0.11, -0.05).color(METAL_LIGHT).tag(AnimTag::Recoil)),
-        WeaponKind::Shotgun => Part::pivot()
+        MainWeapon::FireStaff => staff(
+            Part::pivot()
+                .with(Part::sphere(0.16).color(GLOW_ORANGE).glow(6.0).tag(AnimTag::Pulse))
+                .with(Part::pivot().tag(AnimTag::Spin(3.0)).with_all((0..3).map(|i| {
+                    let a = i as f32 * 120.0;
+                    Part::cone(0.05, 0.14).at(0.0, -0.06, 0.0).rot_y(a).rot_x(25.0).color(WOOD)
+                }))),
+            accent,
+        ),
+        MainWeapon::LightningStaff => staff(
+            Part::pivot()
+                .with(Part::ico(0.15, 0.24, 0.15).color(GLOW_CYAN).glow(6.0).tag(AnimTag::Pulse))
+                .with(Part::pivot().tag(AnimTag::Spin(-4.0)).with(Part::torus(0.22, 0.02).rot_x(70.0).color(METAL_LIGHT))),
+            accent,
+        ),
+        MainWeapon::Bow => {
+            // Limbs: segments along a curve, the string straight.
+            let mut bow = Part::pivot().at(0.0, 0.0, -0.2);
+            for i in -3..=3 {
+                let t = i as f32 / 3.0;
+                let y = t * 0.36;
+                let z = 0.09 * (1.0 - t * t);
+                bow = bow.with(Part::cube(0.035, 0.13, 0.04).at(0.0, y, -z).rot_x(-t * 30.0).color(WOOD));
+            }
+            bow.with(Part::cube(0.006, 0.72, 0.006).at(0.0, 0.0, 0.0).color(BONE))
+                .with(Part::cube(0.05, 0.1, 0.05).color(accent).glow(2.0))
+                .with(Part::cylinder(0.018, 0.5).at(0.0, 0.0, -0.08).rot_x(90.0).color(WOOD_DARK).tag(AnimTag::Recoil))
+                .rot_z(-12.0)
+        }
+        MainWeapon::Revolver => Part::pivot()
+            .with(Part::cube(0.075, 0.18, 0.1).at(0.0, -0.08, 0.04).rot_x(-20.0).color(WOOD))
+            .with(Part::cylinder(0.12, 0.1).at(0.0, 0.04, -0.06).rot_x(90.0).color(METAL_LIGHT).tag(AnimTag::Recoil))
+            .with(Part::cylinder(0.05, 0.32).at(0.0, 0.05, -0.24).rot_x(90.0).color(METAL_DARK))
+            .with(Part::cube(0.03, 0.03, 0.03).at(0.0, 0.09, -0.38).color(accent).glow(4.0))
+            .with(Part::cube(0.06, 0.06, 0.1).at(0.0, 0.07, 0.03).color(METAL_DARK)),
+        MainWeapon::Shotgun => Part::pivot()
             .with(grip)
             .with(Part::cylinder(0.065, 0.58).at(0.036, 0.05, -0.32).rot_x(90.0).color(METAL_DARK))
             .with(Part::cylinder(0.065, 0.58).at(-0.036, 0.05, -0.32).rot_x(90.0).color(METAL_DARK))
@@ -673,18 +697,7 @@ pub fn weapon(kind: WeaponKind, accent: Color) -> Part {
             .with(Part::cube(0.12, 0.13, 0.22).at(0.0, 0.03, -0.01).color(METAL_LIGHT))
             .with(Part::cube(0.1, 0.13, 0.32).at(0.0, -0.04, 0.24).rot_x(10.0).color(WOOD))
             .with(Part::torus(0.16, 0.03).at(0.0, 0.05, -0.55).rot_x(90.0).color(accent).glow(3.0)),
-        WeaponKind::AssaultRifle => Part::pivot()
-            .with(grip)
-            .with(Part::cube(0.09, 0.13, 0.46).at(0.0, 0.03, -0.1).color(METAL_DARK))
-            .with(Part::cube(0.1, 0.1, 0.24).at(0.0, 0.04, -0.4).color(METAL_LIGHT))
-            .with(Part::cylinder(0.045, 0.2).at(0.0, 0.04, -0.55).rot_x(90.0).color(METAL_DARK))
-            .with(Part::cube(0.06, 0.22, 0.09).at(0.0, -0.13, -0.1).rot_x(15.0).color(METAL_LIGHT))
-            .with(Part::cube(0.08, 0.13, 0.26).at(0.0, -0.0, 0.24).color(METAL_DARK))
-            .with(Part::cylinder(0.055, 0.16).at(0.0, 0.14, -0.08).rot_x(90.0).color(METAL_DARK))
-            .with(Part::cylinder(0.045, 0.01).at(0.0, 0.14, -0.165).rot_x(90.0).color(accent).glow(4.0))
-            .with(Part::cube(0.092, 0.02, 0.3).at(0.0, -0.02, -0.12).color(accent).glow(2.5))
-            .with(Part::cube(0.03, 0.04, 0.08).at(0.05, 0.06, -0.02).color(METAL_LIGHT).tag(AnimTag::Recoil)),
-        WeaponKind::Sniper => Part::pivot()
+        MainWeapon::Sniper => Part::pivot()
             .with(grip)
             .with(Part::cube(0.09, 0.12, 0.5).at(0.0, 0.03, -0.08).color(METAL_DARK))
             .with(Part::cylinder(0.045, 0.62).at(0.0, 0.04, -0.6).rot_x(90.0).color(METAL_DARK))
@@ -692,85 +705,43 @@ pub fn weapon(kind: WeaponKind, accent: Color) -> Part {
             .with(Part::cylinder(0.085, 0.34).at(0.0, 0.15, -0.12).rot_x(90.0).color(METAL_LIGHT))
             .with(Part::cylinder(0.075, 0.01).at(0.0, 0.15, -0.295).rot_x(90.0).color(accent).glow(5.0))
             .with(Part::cube(0.08, 0.14, 0.3).at(0.0, -0.01, 0.26).rot_x(6.0).color(METAL_DARK))
-            .with(Part::cube(0.092, 0.02, 0.4).at(0.0, -0.02, -0.12).color(accent).glow(2.5))
+            .with(Part::cube(0.092, 0.02, 0.4).at(0.0, -0.02, -0.12).color(TEAL_GLOW).glow(2.5))
             .with(Part::cylinder(0.04, 0.06).at(0.06, 0.06, 0.0).rot_z(90.0).color(METAL_LIGHT).tag(AnimTag::Recoil)),
-        WeaponKind::RocketLauncher => Part::pivot()
-            .with(grip)
-            .with(Part::cylinder(0.2, 0.82).at(0.0, 0.07, -0.2).rot_x(90.0).color(rgb(0.24, 0.32, 0.26)))
-            .with(Part::torus(0.24, 0.06).at(0.0, 0.07, -0.6).rot_x(90.0).color(METAL_DARK))
-            .with(Part::frustum(0.26, 0.14).at(0.0, 0.07, 0.24).rot_x(-90.0).color(METAL_DARK))
-            .with(Part::cone(0.12, 0.16).at(0.0, 0.07, -0.56).rot_x(-90.0).color(GLOW_ORANGE).glow(3.0))
-            .with(Part::cube(0.05, 0.08, 0.1).at(0.0, 0.2, -0.15).color(METAL_DARK))
-            .with(Part::cube(0.02, 0.02, 0.02).at(0.0, 0.25, -0.15).color(accent).glow(4.0))
-            .with(Part::torus(0.21, 0.03).at(0.0, 0.07, -0.1).rot_x(90.0).color(accent).glow(2.5)),
-        WeaponKind::Revolver => Part::pivot()
-            .with(Part::cube(0.075, 0.18, 0.1).at(0.0, -0.08, 0.04).rot_x(-20.0).color(WOOD))
-            .with(Part::cylinder(0.12, 0.1).at(0.0, 0.04, -0.06).rot_x(90.0).color(METAL_LIGHT).tag(AnimTag::Recoil))
-            .with(Part::cylinder(0.05, 0.32).at(0.0, 0.05, -0.24).rot_x(90.0).color(METAL_DARK))
-            .with(Part::cube(0.03, 0.03, 0.03).at(0.0, 0.09, -0.38).color(accent).glow(4.0))
-            .with(Part::cube(0.06, 0.06, 0.1).at(0.0, 0.07, 0.03).color(METAL_DARK)),
-        WeaponKind::BurstRifle => Part::pivot()
-            .with(grip)
-            .with(Part::cube(0.1, 0.14, 0.5).at(0.0, 0.03, -0.12).color(ARMOR_WHITE))
-            .with(Part::cylinder(0.045, 0.16).at(0.0, 0.04, -0.45).rot_x(90.0).color(METAL_DARK))
-            .with(Part::cube(0.06, 0.18, 0.09).at(0.0, -0.11, -0.12).color(METAL_DARK))
-            .with(Part::cube(0.08, 0.12, 0.22).at(0.0, 0.0, 0.25).color(ARMOR_WHITE))
-            .with(Part::ico(0.025, 0.025, 0.025).at(0.051, 0.06, -0.2).color(accent).glow(5.0))
-            .with(Part::ico(0.025, 0.025, 0.025).at(0.051, 0.06, -0.14).color(accent).glow(5.0))
-            .with(Part::ico(0.025, 0.025, 0.025).at(0.051, 0.06, -0.08).color(accent).glow(5.0))
-            .with(Part::cube(0.03, 0.04, 0.08).at(-0.05, 0.06, -0.02).color(METAL_LIGHT).tag(AnimTag::Recoil)),
-        WeaponKind::Minigun => {
-            let mut barrels = Part::pivot().at(0.0, 0.0, -0.45).tag(AnimTag::Spin(-9.0));
-            for i in 0..6 {
-                let a = i as f32 / 6.0 * std::f32::consts::TAU;
-                barrels = barrels.with(Part::cylinder(0.035, 0.6).at(a.cos() * 0.055, a.sin() * 0.055, 0.0).rot_x(90.0).color(METAL_DARK));
-            }
-            // The barrel group spins around the barrel axis: rotate the pivot so its Y is the barrel axis.
-            let barrels = Part::pivot().at(0.0, 0.0, -0.15).rot_x(90.0).with(barrels.rot_x(-90.0));
-            Part::pivot()
-                .with(Part::cube(0.16, 0.18, 0.32).at(0.0, 0.0, 0.05).color(METAL_LIGHT))
-                .with(Part::cube(0.05, 0.16, 0.08).at(0.0, -0.14, 0.05).color(METAL_DARK))
-                .with(Part::cylinder(0.2, 0.06).at(0.0, 0.0, -0.13).rot_x(90.0).color(accent).glow(2.0))
-                .with(Part::cylinder(0.2, 0.04).at(0.0, 0.0, -0.68).rot_x(90.0).color(METAL_DARK))
-                .with(barrels)
-        }
-        WeaponKind::GrenadeLauncher => Part::pivot()
-            .with(grip)
-            .with(Part::cylinder(0.2, 0.14).at(0.0, 0.05, -0.08).rot_x(90.0).color(rgb(0.3, 0.32, 0.2)).tag(AnimTag::Recoil))
-            .with(Part::cylinder(0.11, 0.36).at(0.0, 0.05, -0.32).rot_x(90.0).color(METAL_DARK))
-            .with(Part::torus(0.13, 0.03).at(0.0, 0.05, -0.48).rot_x(90.0).color(accent).glow(3.0))
-            .with(Part::cube(0.07, 0.1, 0.25).at(0.0, 0.0, 0.18).color(rgb(0.3, 0.32, 0.2))),
-        WeaponKind::Railgun => Part::pivot()
-            .with(grip)
-            .with(Part::cube(0.1, 0.14, 0.42).at(0.0, 0.02, -0.05).color(METAL_DARK))
-            .with(Part::cube(0.025, 0.03, 0.7).at(0.045, 0.06, -0.45).color(METAL_LIGHT))
-            .with(Part::cube(0.025, 0.03, 0.7).at(-0.045, 0.06, -0.45).color(METAL_LIGHT))
-            .with(Part::cube(0.02, 0.015, 0.6).at(0.0, 0.06, -0.45).color(TEAL_GLOW).glow(5.0))
-            .with(Part::torus(0.12, 0.03).at(0.0, 0.05, -0.3).rot_x(90.0).color(accent).glow(3.0))
-            .with(Part::torus(0.12, 0.03).at(0.0, 0.05, -0.55).rot_x(90.0).color(accent).glow(3.0))
-            .with(Part::cube(0.08, 0.13, 0.22).at(0.0, -0.01, 0.25).color(METAL_DARK)),
-        WeaponKind::PlasmaRifle => Part::pivot()
-            .with(grip)
-            .with(Part::capsule(0.14, 0.5).at(0.0, 0.03, -0.18).rot_x(90.0).color(rgb(0.35, 0.15, 0.55)))
-            .with(Part::sphere(0.1).at(0.0, 0.09, -0.12).color(GLOW_MAGENTA).glow(6.0).tag(AnimTag::Pulse))
-            .with(Part::cylinder(0.06, 0.12).at(0.0, 0.03, -0.48).rot_x(90.0).color(METAL_DARK))
-            .with(Part::torus(0.09, 0.025).at(0.0, 0.03, -0.53).rot_x(90.0).color(GLOW_CYAN).glow(4.0)),
+        MainWeapon::Bananarang => Part::pivot().at(0.0, 0.05, -0.2).rot_x(70.0).with(banana(0.5)),
+        MainWeapon::HeroSword => Part::pivot()
+            .with(Part::cylinder(0.05, 0.16).at(0.0, -0.04, 0.04).rot_x(90.0).color(WOOD_DARK))
+            .with(Part::sphere(0.06).at(0.0, -0.04, 0.13).color(GOLD))
+            .with(Part::cube(0.26, 0.04, 0.05).at(0.0, -0.04, -0.05).color(GOLD).tag(AnimTag::Recoil))
+            .with(Part::cube(0.075, 0.015, 0.72).at(0.0, -0.04, -0.43).color(rgb(0.85, 0.9, 1.0)).glow(0.6))
+            .with(Part::prism(0.075, 0.015, 0.1).at(0.0, -0.04, -0.84).rot_x(-90.0).color(rgb(0.85, 0.9, 1.0)))
+            .with(Part::cube(0.02, 0.018, 0.6).at(0.0, -0.04, -0.4).color(accent).glow(4.0)),
     }
 }
 
-/// A weapon lying on the ground: bigger, floating and spinning, on a glowing
-/// ring colored by rarity.
-pub fn weapon_pickup(kind: WeaponKind) -> Part {
-    let [r, g, b] = kind.rarity().color();
-    let rarity = Color::srgb(r, g, b);
+/// A banana boomerang lying in the XZ plane, `size` across.
+fn banana(size: f32) -> Part {
+    let yellow = rgb(1.0, 0.86, 0.25);
+    let k = size;
     Part::pivot()
-        .with(Part::torus(1.1, 0.06).at(0.0, -0.75, 0.0).color(rarity).glow(3.0))
-        .with(Part::cylinder(0.9, 0.02).at(0.0, -0.78, 0.0).color(rarity).glow(1.2))
-        .with(
-            Part::pivot()
-                .tag(AnimTag::Bob)
-                .with(Part::pivot().tag(AnimTag::Spin(1.6)).with(Part::pivot().rot_y(90.0).with(scale_part(weapon(kind, rarity), 1.8)))),
-        )
+        .with(Part::ellipsoid(0.62 * k, 0.16 * k, 0.2 * k).at(-0.22 * k, 0.0, 0.08 * k).rot_y(-28.0).color(yellow))
+        .with(Part::ellipsoid(0.62 * k, 0.16 * k, 0.2 * k).at(0.22 * k, 0.0, 0.08 * k).rot_y(28.0).color(yellow))
+        .with(Part::cube(0.06 * k, 0.1 * k, 0.06 * k).at(-0.5 * k, 0.0, 0.22 * k).color(WOOD_DARK))
+        .with(Part::cube(0.06 * k, 0.1 * k, 0.06 * k).at(0.5 * k, 0.0, 0.22 * k).color(WOOD_DARK))
+}
+
+/// Icon-ish 3D model of an automatic weapon (floating next to the player).
+pub fn auto_weapon(kind: AutoWeapon) -> Part {
+    match kind {
+        AutoWeapon::Axes => axe(),
+        _ => Part::pivot().with(Part::ico(0.3, 0.3, 0.3).color(GLOW_CYAN).glow(4.0)),
+    }
+}
+
+fn axe() -> Part {
+    Part::pivot()
+        .with(Part::cylinder(0.12, 1.2).color(WOOD))
+        .with(Part::prism(0.7, 0.5, 0.08).at(0.28, 0.4, 0.0).rot_z(-90.0).color(METAL_LIGHT))
+        .with(Part::cube(0.06, 0.5, 0.1).at(0.6, 0.4, 0.0).color(GLOW_ORANGE).glow(2.5))
 }
 
 /// Scales a whole part tree (sizes and positions).
@@ -782,30 +753,41 @@ pub fn scale_part(mut p: Part, k: f32) -> Part {
 }
 
 // ---------------------------------------------------------------------------
-// Projectiles (oriented along -Z).
+// Projectiles (oriented along -Z). Player projectiles are modelled for a
+// radius of 1 and scaled to their actual size (size upgrades show!).
 // ---------------------------------------------------------------------------
 
-pub fn projectile(kind: ProjectileKind) -> Part {
-    match kind {
-        ProjectileKind::Rocket => Part::pivot()
-            .with(Part::cylinder(0.13, 0.5).rot_x(90.0).color(METAL_LIGHT))
-            .with(Part::cone(0.13, 0.2).at(0.0, 0.0, -0.34).rot_x(-90.0).color(rgb(0.9, 0.25, 0.2)))
-            .with(Part::cone(0.16, 0.4).at(0.0, 0.0, 0.42).rot_x(90.0).color(GLOW_ORANGE).glow(6.0)),
-        ProjectileKind::Acid => Part::pivot()
-            .with(Part::sphere(0.45).color(GLOW_TOXIC).glow(3.5))
-            .with(Part::ico(0.25, 0.25, 0.25).at(0.0, 0.1, 0.25).color(GLOW_TOXIC).glow(2.0)),
-        ProjectileKind::Bolt => Part::pivot().with(Part::ellipsoid(0.25, 0.25, 0.8).color(GLOW_CYAN).glow(5.0)),
-        ProjectileKind::Grenade => Part::pivot()
-            .with(Part::sphere(0.28).color(rgb(0.3, 0.34, 0.2)))
-            .with(Part::torus(0.3, 0.06).color(GLOW_ORANGE).glow(4.0))
-            .with(Part::pivot().tag(AnimTag::Spin(10.0)).with(Part::cube(0.06, 0.1, 0.06).at(0.0, 0.16, 0.0).color(METAL_DARK))),
-        ProjectileKind::Plasma => Part::pivot()
-            .with(Part::ellipsoid(0.3, 0.3, 0.55).color(GLOW_MAGENTA).glow(6.0))
-            .with(Part::ico(0.18, 0.18, 0.18).color(rgb(1.0, 1.0, 1.0)).glow(6.0)),
-        ProjectileKind::BossOrb => Part::pivot()
-            .with(Part::sphere(1.0).color(GLOW_ORANGE).glow(5.0))
-            .with(Part::pivot().tag(AnimTag::Spin(6.0)).with(Part::torus(1.4, 0.12).rot_x(80.0).color(STONE_DARK))),
-    }
+pub fn projectile(kind: ProjectileKind, size: f32) -> Part {
+    let unit = match kind {
+        ProjectileKind::Acid => {
+            return Part::pivot()
+                .with(Part::sphere(0.45).color(GLOW_TOXIC).glow(3.5))
+                .with(Part::ico(0.25, 0.25, 0.25).at(0.0, 0.1, 0.25).color(GLOW_TOXIC).glow(2.0));
+        }
+        ProjectileKind::Bolt => return Part::pivot().with(Part::ellipsoid(0.25, 0.25, 0.8).color(GLOW_CYAN).glow(5.0)),
+        ProjectileKind::BossOrb => {
+            return Part::pivot()
+                .with(Part::sphere(1.0).color(GLOW_ORANGE).glow(5.0))
+                .with(Part::pivot().tag(AnimTag::Spin(6.0)).with(Part::torus(1.4, 0.12).rot_x(80.0).color(STONE_DARK)));
+        }
+        ProjectileKind::Fireball => Part::pivot()
+            .with(Part::sphere(2.0).color(GLOW_ORANGE).glow(6.0))
+            .with(Part::ico(1.3, 1.3, 1.3).color(rgb(1.0, 0.9, 0.4)).glow(8.0).tag(AnimTag::Spin(8.0)))
+            .with(Part::cone(1.6, 2.2).at(0.0, 0.0, 1.4).rot_x(90.0).color(rgb(1.0, 0.3, 0.1)).glow(4.0)),
+        ProjectileKind::Arrow => Part::pivot()
+            .with(Part::cylinder(0.25, 6.0).rot_x(90.0).color(WOOD))
+            .with(Part::cone(0.8, 1.2).at(0.0, 0.0, -3.4).rot_x(-90.0).color(METAL_LIGHT).glow(1.5))
+            .with(Part::cube(0.08, 1.0, 1.4).at(0.0, 0.0, 2.6).color(rgb(0.95, 0.95, 1.0)).glow(1.0))
+            .with(Part::cube(1.0, 0.08, 1.4).at(0.0, 0.0, 2.6).color(rgb(0.95, 0.95, 1.0)).glow(1.0)),
+        ProjectileKind::Bullet => Part::pivot().with(Part::ellipsoid(1.4, 1.4, 6.0).color(rgb(1.0, 0.9, 0.5)).glow(8.0)),
+        ProjectileKind::Pellet => Part::pivot().with(Part::ellipsoid(1.6, 1.6, 3.5).color(rgb(1.0, 0.75, 0.35)).glow(7.0)),
+        ProjectileKind::SwordWave => Part::pivot()
+            .with(Part::ellipsoid(2.4, 0.22, 0.7).color(rgb(0.8, 0.95, 1.0)).glow(6.0))
+            .with(Part::ellipsoid(1.6, 0.12, 0.5).at(0.0, 0.0, 0.35).color(GLOW_CYAN).glow(4.0)),
+        ProjectileKind::Banana => Part::pivot().tag(AnimTag::Spin(16.0)).with(banana(2.0)),
+        ProjectileKind::Axe => Part::pivot().with(Part::pivot().rot_z(90.0).tag(AnimTag::Spin(12.0)).with(scale_part(axe(), 0.8))),
+    };
+    scale_part(unit, size)
 }
 
 // ---------------------------------------------------------------------------

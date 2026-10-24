@@ -7,6 +7,7 @@
 //! One server tick (FixedUpdate, 60 Hz) runs these sets in order:
 //! `Input -> Players -> Mobs -> Combat -> Damage -> World`.
 
+pub mod autos;
 pub mod chests;
 pub mod combat;
 pub mod lobby;
@@ -63,6 +64,7 @@ impl Plugin for GamePlugin {
                 lobby::LobbyPlugin,
                 players::PlayersPlugin,
                 combat::CombatPlugin,
+                autos::AutosPlugin,
                 mobs::MobsPlugin,
                 chests::ChestsPlugin,
                 progress::ProgressPlugin,

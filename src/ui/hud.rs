@@ -14,7 +14,7 @@ use crate::render::fx::HudFeedback;
 use crate::render::MainCamera;
 use crate::shared::economy;
 use crate::shared::items::{ItemKind, PlayerStats};
-use crate::shared::weapons::magazine_size;
+use crate::shared::build::{auto_params, main_params, owned_tomes, tome_points, Offer};
 
 #[derive(Component)]
 struct HpFill;
@@ -216,7 +216,7 @@ fn spawn_hud(mut commands: Commands) {
     let br = child(&mut commands, (Node { align_items: AlignItems::FlexEnd, ..abs_node(None, Some(24.0), None, Some(24.0)) },));
     commands.spawn((label("", 16.0, TEXT_DIM), SlotsText, ChildOf(br)));
     commands.spawn((label("", 22.0, TEXT), WeaponText, ChildOf(br)));
-    commands.spawn((Text::new(""), bold(44.0), TextColor(TEXT), TextShadow::default(), AmmoText, ChildOf(br)));
+    commands.spawn((Text::new(""), bold(20.0), TextColor(TEXT), TextShadow::default(), AmmoText, ChildOf(br)));
     commands.spawn((bar(200.0, 6.0, ACCENT, ReloadFill), ChildOf(br)));
     commands.spawn((label("", 16.0, TEXT_DIM), DashText, ChildOf(br)));
 
@@ -408,34 +408,44 @@ fn update_weapon(
     mut slots: Query<&mut Text, (With<SlotsText>, Without<WeaponText>, Without<AmmoText>, Without<DashText>)>,
     mut dash: Query<&mut Text, (With<DashText>, Without<WeaponText>, Without<AmmoText>, Without<SlotsText>)>,
     mut reload: Query<&mut Node, With<ReloadFill>>,
+    gears: Query<(&Player, &Gear)>,
 ) {
     if !pred.active {
         return;
     }
-    let a = &pred.sim.arsenal;
-    let kind = a.current_kind();
-    let stats = local_player(&local, &players).map(|(_, _, _, i)| PlayerStats::from_inventory(&i.0)).unwrap_or_else(|| PlayerStats::from_inventory(&Default::default()));
+    let Some((me, _, _, items)) = local_player(&local, &players) else { return };
+    let Some((_, gear)) = gears.iter().find(|(p, _)| p.slot == me.slot) else { return };
+    let stats = PlayerStats::from_inventory(&items.0);
+    let g = &gear.0;
+    let p = main_params(g.main, &g.main_up, &stats);
     if let Ok(mut t) = weapon.single_mut() {
-        set_text(&mut t, kind.def().name.to_string());
+        set_text(&mut t, format!("{}  Nv {}", g.main.def().name, g.main_up.level + 1));
     }
     if let Ok(mut t) = ammo.single_mut() {
-        set_text(&mut t, if a.is_reloading() {
-            "Rechargement".into()
-        } else {
-            format!("{} / {}", a.weapons[a.current].ammo, magazine_size(kind, &stats))
-        });
+        set_text(&mut t, format!("{:.0} dégâts  ×{}  {:.1} tirs/s", p.damage, p.count, 1.0 / p.interval.max(0.01)));
     }
     if let Ok(mut t) = slots.single_mut() {
-        set_text(&mut t, a
-            .weapons
+        // Automatic weapons, then tomes.
+        let mut lines: Vec<String> = g
+            .autos
             .iter()
-            .enumerate()
-            .map(|(i, w)| if i == a.current { format!("[{} {}]", i + 1, w.kind.def().name) } else { format!("{} {}", i + 1, w.kind.def().name) })
-            .collect::<Vec<_>>()
-            .join("  "));
+            .map(|(a, up)| {
+                let ap = auto_params(*a, up, &stats);
+                format!("{} Nv {} ({:.0})", a.def().name, up.level, ap.damage)
+            })
+            .collect();
+        let tomes: Vec<String> = owned_tomes(&items.0)
+            .into_iter()
+            .map(|t| format!("{} ×{:.1}", t.name().trim_start_matches("Tome "), tome_points(&items.0, t)))
+            .collect();
+        if !tomes.is_empty() {
+            lines.push(format!("Tomes : {}", tomes.join(", ")));
+        }
+        set_text(&mut t, lines.join("\n"));
     }
     if let Ok(mut node) = reload.single_mut() {
-        let frac = if a.is_reloading() { 1.0 - a.reload_left / kind.def().reload_time } else { 0.0 };
+        // Main weapon cooldown.
+        let frac = 1.0 - pred.sim.gun.cooldown / p.interval.max(0.01);
         node.width = Val::Percent(frac.clamp(0.0, 1.0) * 100.0);
     }
     if let Ok(mut t) = dash.single_mut() {
@@ -509,7 +519,6 @@ fn update_prompt(
     players: Query<LocalQuery>,
     states: Query<(&Player, &PlayerState, &Health)>,
     chests: Query<(&Chest, &ChestOpen)>,
-    pickups: Query<&WeaponPickup>,
     statues: Query<(&Statue, &StatueUsed)>,
     pending: Query<(&Player, &Items, Has<PendingChoice>)>,
     info: Query<&MatchInfo>,
@@ -549,18 +558,6 @@ fn update_prompt(
                 "Statue : un boss est déjà en vie".to_string()
             } else {
                 format!("[E] Réveiller la statue — invoque : {} (coffre légendaire à la clé)", statue.boss.def().name)
-            };
-        } else if let Some(pickup) = pickups
-            .iter()
-            .filter(|p| p.pos.distance(pos + Vec3::Y * 0.9) < crate::game::chests::PICKUP_RANGE)
-            .min_by(|a, b| a.pos.distance(pos).total_cmp(&b.pos.distance(pos)))
-        {
-            let def = pickup.kind.def();
-            let a = &pred.sim.arsenal;
-            text = if a.weapons.len() >= crate::shared::weapons::MAX_WEAPONS && !a.has(pickup.kind) {
-                format!("[E] Prendre {} ({}) — remplace {}", def.name, def.rarity.name(), a.current_kind().def().name)
-            } else {
-                format!("[E] Prendre {} ({})", def.name, def.rarity.name())
             };
         } else if let Some((chest, _)) = chests
             .iter()
@@ -675,9 +672,11 @@ fn toasts_from_events(
                     let [r, g, b] = i.rarity().color();
                     (format!("{} obtient {} — {}", name(*slot), i.name(), i.description()), Color::srgb(r, g, b))
                 }
-                Reward::Weapon(w) => {
-                    let [r, g, b] = w.rarity().color();
-                    (format!("{} prend : {}", name(*slot), w.def().name), Color::srgb(r, g, b))
+                Reward::Offer(card) => {
+                    // Only new weapons are worth telling everyone about.
+                    let Offer::NewAuto(a) = card.offer else { continue };
+                    let [r, g, b] = card.rarity.color();
+                    (format!("{} obtient l'arme {}", name(*slot), a.def().name), Color::srgb(r, g, b))
                 }
             },
             GameEvent::AnkhUsed { slot } => (format!("L'Ankh a sauvé {} !", name(*slot)), crate::render::palette::GOLD),
@@ -807,7 +806,6 @@ fn spawn_world_labels(
     local: Res<LocalPlayer>,
     players: Query<(Entity, &Player), Added<PlayerState>>,
     chests: Query<(Entity, &Chest), Added<Chest>>,
-    new_pickups: Query<(Entity, &WeaponPickup), Added<WeaponPickup>>,
     info: Query<&MatchInfo>,
 ) {
     for (e, p) in &players {
@@ -820,19 +818,6 @@ fn spawn_world_labels(
             Text::new(p.name.clone()),
             bold(18.0),
             TextColor(player_color(p.slot)),
-            TextShadow::default(),
-            Node { position_type: PositionType::Absolute, ..default() },
-            Visibility::Hidden,
-        ));
-    }
-    for (e, p) in &new_pickups {
-        let [r, g, b] = p.kind.rarity().color();
-        commands.spawn((
-            DespawnOnExit(AppState::InGame),
-            WorldLabel { target: e, height: 0.9, max_distance: 18.0 },
-            Text::new(p.kind.def().name),
-            bold(16.0),
-            TextColor(Color::srgb(r, g, b)),
             TextShadow::default(),
             Node { position_type: PositionType::Absolute, ..default() },
             Visibility::Hidden,

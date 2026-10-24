@@ -1,5 +1,5 @@
-//! The card choice shown after opening a chest: 3 upgrades (4 with the
-//! Crown), pick one with a click or the keys 1-4.
+//! The card choice shown after opening a chest or on a team level-up:
+//! 3 cards (4 with the Crown), pick one with a click or the keys 1-4.
 
 use bevy::picking::hover::Hovered;
 use bevy::prelude::*;
@@ -7,11 +7,11 @@ use bevy::ui_widgets::{observe, Activate, Button};
 
 use super::widgets::*;
 use super::AppState;
-use crate::net::protocol::{ChooseCard, PendingChoice, Player};
+use crate::net::protocol::{CardOption, ChooseCard, PendingChoice, Player};
 use crate::net::LocalPlayer;
 use crate::render::audio::{PlaySfx, Sfx};
 use crate::render::icons::Icons;
-use crate::shared::items::ItemKind;
+use crate::shared::build::{describe_offer, Offer};
 
 /// True while our card choice is on screen (frees the mouse cursor).
 #[derive(Resource, Default)]
@@ -19,7 +19,50 @@ pub struct ChoosingCard(pub bool);
 
 #[derive(Component)]
 struct CardsOverlay {
-    options: Vec<ItemKind>,
+    options: Vec<CardOption>,
+}
+
+/// Everything a card displays.
+struct CardLook {
+    rarity: Color,
+    rarity_name: &'static str,
+    icon: Handle<Image>,
+    title: String,
+    category: (&'static str, Color),
+    description: String,
+}
+
+fn card_look(option: &CardOption, icons: &Icons) -> CardLook {
+    match option {
+        CardOption::Item(item) => {
+            let category = item.category();
+            CardLook {
+                rarity: rgb3(item.rarity().color()),
+                rarity_name: item.rarity().name(),
+                icon: icons.items.get(item).cloned().unwrap_or_default(),
+                title: item.name().to_string(),
+                category: (category.name(), rgb3(category.color())),
+                description: item.description().to_string(),
+            }
+        }
+        CardOption::Offer(card) => {
+            let (title, description) = describe_offer(card);
+            let (icon, category) = match &card.offer {
+                Offer::UpgradeMain { .. } => (None, ("Arme principale", Color::srgb(1.0, 0.55, 0.25))),
+                Offer::NewAuto(a) => (icons.autos.get(a), ("Nouvelle arme auto", Color::srgb(1.0, 0.85, 0.3))),
+                Offer::UpgradeAuto { weapon, .. } => (icons.autos.get(weapon), ("Arme auto", Color::srgb(0.35, 0.9, 1.0))),
+                Offer::Tome { tome, .. } => (icons.tomes.get(tome), ("Tome", Color::srgb(0.75, 0.5, 1.0))),
+            };
+            CardLook {
+                rarity: rgb3(card.rarity.color()),
+                rarity_name: card.rarity.name(),
+                icon: icon.cloned().unwrap_or_default(),
+                title,
+                category,
+                description,
+            }
+        }
+    }
 }
 
 #[derive(Component)]
@@ -42,12 +85,15 @@ fn rgb3(c: [f32; 3]) -> Color {
 fn show_cards(
     mut commands: Commands,
     local: Res<LocalPlayer>,
-    players: Query<(&Player, Option<&PendingChoice>)>,
+    players: Query<(&Player, Option<&PendingChoice>, Option<&crate::net::protocol::Gear>)>,
     overlay: Query<(Entity, &CardsOverlay)>,
     icons: Res<Icons>,
     mut choosing: ResMut<ChoosingCard>,
 ) {
-    let pending = players.iter().find(|(p, _)| Some(p.slot) == local.slot).and_then(|(_, c)| c);
+    let me = players.iter().find(|(p, ..)| Some(p.slot) == local.slot);
+    let pending = me.and_then(|(_, c, _)| c);
+    // Main weapon upgrades show the icon of our main weapon.
+    let main_icon = me.and_then(|(.., g)| g).and_then(|g| icons.mains.get(&g.0.main)).cloned().unwrap_or_default();
     let current = overlay.single().ok();
     match (pending, current) {
         (None, Some((e, _))) => {
@@ -56,17 +102,17 @@ fn show_cards(
         }
         (Some(choice), Some((e, o))) if o.options != choice.options => {
             commands.entity(e).try_despawn();
-            spawn_overlay(&mut commands, choice, &icons);
+            spawn_overlay(&mut commands, choice, &icons, &main_icon);
         }
         (Some(choice), None) => {
-            spawn_overlay(&mut commands, choice, &icons);
+            spawn_overlay(&mut commands, choice, &icons, &main_icon);
             choosing.0 = true;
         }
         _ => {}
     }
 }
 
-fn spawn_overlay(commands: &mut Commands, choice: &PendingChoice, icons: &Icons) {
+fn spawn_overlay(commands: &mut Commands, choice: &PendingChoice, icons: &Icons, main_icon: &Handle<Image>) {
     let root = commands
         .spawn((
             DespawnOnExit(AppState::InGame),
@@ -86,7 +132,10 @@ fn spawn_overlay(commands: &mut Commands, choice: &PendingChoice, icons: &Icons)
         ))
         .id();
     commands.spawn((
-        Text::new(format!("Choisis une amélioration — {}", choice.chest.name())),
+        Text::new(match choice.chest {
+            Some(chest) => format!("Choisis une amélioration — {}", chest.name()),
+            None => "NIVEAU SUPÉRIEUR ! Choisis une amélioration".to_string(),
+        }),
         bold(30.0),
         TextColor(ACCENT),
         TextShadow::default(),
@@ -95,9 +144,12 @@ fn spawn_overlay(commands: &mut Commands, choice: &PendingChoice, icons: &Icons)
     let row = commands
         .spawn((Node { flex_direction: FlexDirection::Row, column_gap: Val::Px(18.0), ..default() }, ChildOf(root)))
         .id();
-    for (i, item) in choice.options.iter().enumerate() {
-        let rarity = rgb3(item.rarity().color());
-        let category = item.category();
+    for (i, option) in choice.options.iter().enumerate() {
+        let mut look = card_look(option, icons);
+        if matches!(option, CardOption::Offer(c) if matches!(c.offer, Offer::UpgradeMain { .. })) {
+            look.icon = main_icon.clone();
+        }
+        let rarity = look.rarity;
         let card = commands
             .spawn((
                 Button,
@@ -123,25 +175,25 @@ fn spawn_overlay(commands: &mut Commands, choice: &PendingChoice, icons: &Icons)
                 ChildOf(row),
             ))
             .id();
-        commands.spawn((Text::new(item.rarity().name().to_uppercase()), bold(15.0), TextColor(rarity), ChildOf(card)));
+        commands.spawn((Text::new(look.rarity_name.to_uppercase()), bold(15.0), TextColor(rarity), ChildOf(card)));
         commands.spawn((
-            ImageNode::new(icons.items.get(item).cloned().unwrap_or_default()),
+            ImageNode::new(look.icon),
             Node { width: Val::Px(110.0), height: Val::Px(110.0), ..default() },
             ChildOf(card),
         ));
-        commands.spawn((Text::new(item.name()), bold(21.0), TextColor(TEXT), TextLayout::justify(Justify::Center), ChildOf(card)));
+        commands.spawn((Text::new(look.title), bold(21.0), TextColor(TEXT), TextLayout::justify(Justify::Center), ChildOf(card)));
         commands.spawn((
             Node {
                 padding: UiRect::axes(Val::Px(10.0), Val::Px(2.0)),
                 border_radius: BorderRadius::all(Val::Px(8.0)),
                 ..default()
             },
-            BackgroundColor(rgb3(category.color()).with_alpha(0.25)),
+            BackgroundColor(look.category.1.with_alpha(0.25)),
             ChildOf(card),
-            children![(Text::new(category.name()), bold(14.0), TextColor(rgb3(category.color())))],
+            children![(Text::new(look.category.0), bold(14.0), TextColor(look.category.1))],
         ));
         commands.spawn((
-            Text::new(item.description()),
+            Text::new(look.description),
             font(16.0),
             TextColor(TEXT_DIM),
             TextLayout::justify(Justify::Center),

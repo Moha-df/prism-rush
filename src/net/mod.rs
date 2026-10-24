@@ -364,7 +364,12 @@ fn close_on_exit(world: &mut World) {
 
 fn send_hello(mut hello: MessageWriter<Hello>, config: Res<AppConfig>) {
     info!("connected, sending hello as '{}'", config.name);
-    hello.write(Hello { name: config.name.clone(), version: PROTOCOL_VERSION });
+    hello.write(Hello {
+        name: config.name.clone(),
+        version: PROTOCOL_VERSION,
+        main: config.main_weapon,
+        autos: config.auto_pool(),
+    });
 }
 
 fn receive_welcome(

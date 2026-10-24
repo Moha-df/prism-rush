@@ -5,6 +5,8 @@
 
 use bevy::prelude::*;
 
+use crate::shared::build::{AutoWeapon, MainWeapon};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LaunchMode {
     /// Main menu, the player chooses.
@@ -39,6 +41,37 @@ pub struct AppConfig {
     pub autopilot: bool,
     /// Debug: runs start at this time (seconds), to test late game.
     pub start_time: f32,
+    // --- Progression kept between runs (Megabonk-like meta) ---
+    /// Starting main weapon picked in the lobby.
+    pub main_weapon: MainWeapon,
+    pub unlocked_mains: Vec<MainWeapon>,
+    pub unlocked_autos: Vec<AutoWeapon>,
+    /// Silver earned in runs, spent in the menu to unlock weapons.
+    pub silver: u32,
+}
+
+/// Indices <-> list, for the settings file ("0,3,5").
+fn parse_list<T: Copy>(value: &str, all: &[T]) -> Vec<T> {
+    value.split(',').filter_map(|v| v.trim().parse::<usize>().ok()).filter_map(|i| all.get(i).copied()).collect()
+}
+
+fn format_list(indices: impl Iterator<Item = usize>) -> String {
+    indices.map(|i| i.to_string()).collect::<Vec<_>>().join(",")
+}
+
+impl AppConfig {
+    pub fn is_unlocked_main(&self, w: MainWeapon) -> bool {
+        w.def().starter || self.unlocked_mains.contains(&w)
+    }
+
+    pub fn is_unlocked_auto(&self, a: AutoWeapon) -> bool {
+        a.def().starter || self.unlocked_autos.contains(&a)
+    }
+
+    /// Automatic weapons that can be offered in a run.
+    pub fn auto_pool(&self) -> Vec<AutoWeapon> {
+        AutoWeapon::ALL.into_iter().filter(|a| self.is_unlocked_auto(*a)).collect()
+    }
 }
 
 const SETTINGS_FILE: &str = "settings.txt";
@@ -61,6 +94,10 @@ impl Default for AppConfig {
             shots: None,
             autopilot: false,
             start_time: 0.0,
+            main_weapon: MainWeapon::FireStaff,
+            unlocked_mains: Vec::new(),
+            unlocked_autos: Vec::new(),
+            silver: 0,
         }
     }
 }
@@ -82,16 +119,35 @@ impl AppConfig {
                 "sensitivity" => cfg.sensitivity = value.parse().unwrap_or(cfg.sensitivity),
                 "fov" => cfg.fov = value.parse().unwrap_or(cfg.fov),
                 "volume" => cfg.volume = value.parse().unwrap_or(cfg.volume),
+                "silver" => cfg.silver = value.parse().unwrap_or(0),
+                "unlocked_mains" => cfg.unlocked_mains = parse_list(value, &MainWeapon::ALL),
+                "unlocked_autos" => cfg.unlocked_autos = parse_list(value, &AutoWeapon::ALL),
+                "main_weapon" => {
+                    if let Some(w) = parse_list(value, &MainWeapon::ALL).first() {
+                        cfg.main_weapon = *w;
+                    }
+                }
                 _ => {}
             }
+        }
+        if !cfg.is_unlocked_main(cfg.main_weapon) {
+            cfg.main_weapon = MainWeapon::FireStaff;
         }
         cfg
     }
 
     pub fn save(&self) {
         let text = format!(
-            "name={}\nlast_address={}\nsensitivity={}\nfov={}\nvolume={}\n",
-            self.name, self.last_address, self.sensitivity, self.fov, self.volume
+            "name={}\nlast_address={}\nsensitivity={}\nfov={}\nvolume={}\nsilver={}\nmain_weapon={}\nunlocked_mains={}\nunlocked_autos={}\n",
+            self.name,
+            self.last_address,
+            self.sensitivity,
+            self.fov,
+            self.volume,
+            self.silver,
+            self.main_weapon.index(),
+            format_list(self.unlocked_mains.iter().map(|w| w.index())),
+            format_list(self.unlocked_autos.iter().map(|a| a.index())),
         );
         if let Err(e) = std::fs::write(SETTINGS_FILE, text) {
             warn!("could not save settings: {e}");

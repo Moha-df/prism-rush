@@ -9,8 +9,10 @@ use bevy_replicon::prelude::*;
 
 use super::{ServerSet, SimTick};
 use crate::net::protocol::*;
+use crate::shared::build::{roll_offers, AutoWeapon};
 use crate::shared::economy;
 use crate::shared::items::PlayerStats;
+use crate::shared::rng::{hash_combine, Rng};
 
 /// Base radius in which gems are collected (Attraction tome increases it).
 pub const BASE_PICKUP_RADIUS: f32 = 3.5;
@@ -21,11 +23,21 @@ pub const MAX_GEMS: usize = 300;
 #[derive(Component, Default, Debug)]
 pub struct LevelUps(pub u32);
 
+/// Automatic weapons a player has unlocked (only those can be offered).
+#[derive(Component, Clone, Debug)]
+pub struct AutoPool(pub Vec<AutoWeapon>);
+
+impl Default for AutoPool {
+    fn default() -> Self {
+        Self(AutoWeapon::ALL.into_iter().filter(|a| a.def().starter).collect())
+    }
+}
+
 pub struct ProgressPlugin;
 
 impl Plugin for ProgressPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(FixedUpdate, (collect_gems, level_up).chain().in_set(ServerSet::World));
+        app.add_systems(FixedUpdate, (collect_gems, level_up, offer_level_ups).chain().in_set(ServerSet::World));
     }
 }
 
@@ -81,5 +93,27 @@ fn level_up(
         }
         info!("team level {}", info.team_level);
         events.write(ToClients { targets: SendTargets::All, message: GameEvent::LevelUp { level: info.team_level } });
+    }
+}
+
+/// A player with level-ups to spend and no open choice gets 3 offers
+/// (weapon upgrades, new automatic weapons, tomes).
+fn offer_level_ups(
+    mut commands: Commands,
+    mut players: Query<(Entity, &Player, &mut LevelUps, &Items, &Gear, &AutoPool), Without<PendingChoice>>,
+    tick: Res<SimTick>,
+) {
+    for (entity, player, mut level_ups, items, gear, pool) in &mut players {
+        if level_ups.0 == 0 {
+            continue;
+        }
+        level_ups.0 -= 1;
+        let stats = PlayerStats::from_inventory(&items.0);
+        let mut rng = Rng::new(hash_combine(&[u64::from(tick.0), u64::from(player.slot), 0x1E7E1]));
+        let options = roll_offers(&gear.0, &items.0, &pool.0, stats.luck, stats.cards, &mut rng)
+            .into_iter()
+            .map(CardOption::Offer)
+            .collect();
+        commands.entity(entity).try_insert(PendingChoice { chest: None, options });
     }
 }

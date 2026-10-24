@@ -64,6 +64,13 @@ fn grow_shockwaves(
     mut models: Query<&mut Transform, Without<HasModel>>,
 ) {
     for (h, has) in &hazards {
+        if h.kind == HazardKind::Tornado {
+            // Tornados wander: move the model along their path.
+            if let Ok(mut t) = models.get_mut(has.model) {
+                t.translation = h.pos_at(clock.estimate) - h.pos;
+            }
+            continue;
+        }
         if h.kind != HazardKind::Shockwave {
             continue;
         }
@@ -130,7 +137,6 @@ fn attach_models(
     mobs: Query<(Entity, &Mob), NeedsModel>,
     chests: Query<(Entity, &Chest), NeedsModel>,
     projectiles: Query<(Entity, &Projectile), NeedsModel>,
-    pickups: Query<(Entity, &WeaponPickup), NeedsModel>,
     statues: Query<(Entity, &Statue), NeedsModel>,
     hazards: Query<(Entity, &Hazard), NeedsModel>,
     gems: Query<(Entity, &XpGem), NeedsModel>,
@@ -167,6 +173,36 @@ fn attach_models(
             HazardKind::Lightning => Part::pivot()
                 .with(Part::cylinder(LIGHTNING_RADIUS * 2.0, 0.06).color(palette::GLOW_MAGENTA).glow(2.5).tag(AnimTag::Pulse))
                 .with(Part::torus(LIGHTNING_RADIUS * 2.0, 0.15).color(palette::GLOW_MAGENTA).glow(5.0)),
+            HazardKind::Mine => Part::pivot()
+                .with(Part::cylinder(0.7, 0.18).color(palette::METAL_DARK))
+                .with(Part::sphere(0.22).at(0.0, 0.12, 0.0).color(palette::BOMB_RED).glow(5.0).tag(AnimTag::Pulse))
+                .with(Part::torus(0.8, 0.04).at(0.0, 0.06, 0.0).color(palette::GLOW_ORANGE).glow(2.0)),
+            HazardKind::Poison => {
+                let d = h.radius * 2.0;
+                Part::pivot()
+                    .with(Part::cylinder(d, 0.04).color(Color::srgb(0.3, 0.75, 0.15)).glow(1.2))
+                    .with(Part::torus(d, 0.1).color(palette::GLOW_TOXIC).glow(3.0).tag(AnimTag::Pulse))
+                    .with_all((0..5).map(|i| {
+                        let a = i as f32 * 1.3;
+                        Part::sphere(0.25).at(a.cos() * h.radius * 0.5, 0.1, a.sin() * h.radius * 0.5).color(palette::GLOW_TOXIC).glow(4.0).tag(AnimTag::Bob)
+                    }))
+            }
+            HazardKind::Fire => Part::pivot().tag(AnimTag::Pulse).with_all((0..4).map(|i| {
+                let a = i as f32 * 1.7;
+                let r = h.radius * 0.45;
+                let s = 0.5 + 0.15 * i as f32;
+                Part::cone(s * h.radius * 0.6, s * 1.2)
+                    .at(a.cos() * r, s * 0.6, a.sin() * r)
+                    .color(if i % 2 == 0 { palette::GLOW_ORANGE } else { Color::srgb(1.0, 0.85, 0.3) })
+                    .glow(5.0)
+            })),
+            HazardKind::Tornado => Part::pivot().tag(AnimTag::Spin(9.0)).with_all((0..5).map(|i| {
+                let k = i as f32;
+                Part::frustum(h.radius * (0.5 + 0.3 * k), 0.7)
+                    .at(0.15 * k.sin(), 0.35 + 0.65 * k, 0.15 * k.cos())
+                    .color(Color::srgb(0.82, 0.86, 0.9))
+                    .glow(if i % 2 == 0 { 0.6 } else { 0.0 })
+            })),
         };
         attach(&mut commands, e, part, 1.0);
     }
@@ -174,10 +210,7 @@ fn attach_models(
         attach(&mut commands, e, models::chest(c.kind), 1.0);
     }
     for (e, p) in &projectiles {
-        attach(&mut commands, e, models::projectile(p.kind), 1.0);
-    }
-    for (e, p) in &pickups {
-        attach(&mut commands, e, models::weapon_pickup(p.kind), 1.0);
+        attach(&mut commands, e, models::projectile(p.kind, p.size), 1.0);
     }
 }
 
@@ -196,7 +229,6 @@ fn detach_player_models(
 fn place_chests(
     mut commands: Commands,
     chests: Query<(Entity, &Chest), Without<Transform>>,
-    pickups: Query<(Entity, &WeaponPickup), Without<Transform>>,
     statues: Query<(Entity, &Statue), Without<Transform>>,
     hazards: Query<(Entity, &Hazard), Without<Transform>>,
     gems: Query<(Entity, &XpGem), Without<Transform>>,
@@ -214,10 +246,6 @@ fn place_chests(
         commands
             .entity(e)
             .try_insert((Transform::from_translation(c.pos).with_rotation(Quat::from_rotation_y(c.yaw)), Visibility::default()));
-    }
-    // Weapons on the ground don't move either.
-    for (e, p) in &pickups {
-        commands.entity(e).try_insert((Transform::from_translation(p.pos), Visibility::default()));
     }
 }
 

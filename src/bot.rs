@@ -58,8 +58,6 @@ pub struct BotView<'a> {
     /// Unopened chests.
     pub chests: &'a [(Vec3, ChestKind)],
     pub downed_allies: &'a [Vec3],
-    /// Weapons on the ground (position, rarity rank 0-3).
-    pub pickups: &'a [(Vec3, u8)],
 }
 
 pub struct BotOutput {
@@ -120,10 +118,6 @@ pub fn think(brain: &mut BotBrain, view: &BotView) -> BotOutput {
     );
     // 3. Fight.
     let enemy = nearest(&mut view.mobs.iter().copied().filter(|p| p.distance(me) < 45.0));
-    // Weapons on the ground better than our worst one.
-    let worst = view.me.arsenal.weapons.iter().map(|w| w.kind.rarity() as u8).min().unwrap_or(0);
-    let pickup = if view.me.arsenal.weapons.len() < 2 { Some(0) } else { Some(worst + 1) }
-        .and_then(|min| nearest(&mut view.pickups.iter().filter(|(p, r)| *r >= min && p.distance(me) < 30.0).map(|(p, _)| *p)));
     // Monsters close by take priority over shopping (survive first).
     let threatened = enemy.is_some_and(|e| e.distance(me) < THREAT_DISTANCE);
     let chest = chest.filter(|_| !threatened);
@@ -146,12 +140,7 @@ pub fn think(brain: &mut BotBrain, view: &BotView) -> BotOutput {
     }
     let chest = chest.filter(|c| !brain.ignored_chests.iter().any(|i| i.distance(*c) < 0.5));
 
-    let (goal, look) = if let Some(w) = pickup.filter(|_| !threatened) {
-        if w.distance(me + Vec3::Y * 0.9) < 2.0 && toggle {
-            buttons_out |= buttons::INTERACT;
-        }
-        (Some(w), w)
-    } else if let Some(a) = ally {
+    let (goal, look) = if let Some(a) = ally {
         if a.distance(me) < 2.0 {
             buttons_out |= buttons::INTERACT;
         }
@@ -162,9 +151,8 @@ pub fn think(brain: &mut BotBrain, view: &BotView) -> BotOutput {
         }
         (Some(c), c + Vec3::Y * 0.5)
     } else if let Some(e) = enemy {
-        if toggle {
-            buttons_out |= buttons::FIRE;
-        }
+        // Hold the trigger: the weapon fires at its own rate.
+        buttons_out |= buttons::FIRE;
         // Circle-strafe at a comfortable distance.
         if brain.ticks.is_multiple_of(180) {
             brain.strafe = -brain.strafe;
@@ -204,32 +192,47 @@ pub fn think(brain: &mut BotBrain, view: &BotView) -> BotOutput {
     if brain.rng.chance(0.004) {
         buttons_out |= buttons::DASH;
     }
-    if brain.ticks.is_multiple_of(600) {
-        buttons_out |= buttons::NEXT_WEAPON;
-    }
 
     BotOutput { move_axis: axis, yaw, pitch, buttons: buttons_out }
 }
 
-/// Bots pick the rarest card offered (ties: the first one).
+/// How much a bot likes a card: rarity first, then new weapons and
+/// main weapon upgrades.
+fn card_score(option: &CardOption) -> u32 {
+    use crate::shared::build::Offer;
+    match option {
+        CardOption::Item(item) => item.rarity() as u32 * 10,
+        CardOption::Offer(card) => {
+            let bonus = match card.offer {
+                Offer::NewAuto(_) => 15,
+                Offer::UpgradeMain { .. } => 5,
+                Offer::UpgradeAuto { .. } => 3,
+                Offer::Tome { .. } => 0,
+            };
+            card.rarity as u32 * 10 + bonus
+        }
+    }
+}
+
+/// Bots pick the card they like most (ties: the first one).
 pub fn bot_pick(choice: &PendingChoice) -> usize {
     choice
         .options
         .iter()
         .enumerate()
-        .max_by_key(|(i, item)| (item.rarity(), std::cmp::Reverse(*i)))
+        .max_by_key(|(i, option)| (card_score(option), std::cmp::Reverse(*i)))
         .map(|(i, _)| i)
         .unwrap_or(0)
 }
 
 fn server_bot_choices(
     mut commands: Commands,
-    mut bots: Query<(Entity, &Player, &PendingChoice, &mut Items), With<BotBrain>>,
+    mut bots: Query<(Entity, &Player, &PendingChoice, &mut Items, &mut Gear), With<BotBrain>>,
     mut events: MessageWriter<bevy_replicon::prelude::ToClients<GameEvent>>,
 ) {
-    for (entity, player, choice, mut items) in &mut bots {
+    for (entity, player, choice, mut items, mut gear) in &mut bots {
         let index = bot_pick(choice);
-        crate::game::chests::apply_choice(&mut commands, entity, player, choice, index, &mut items, &mut events);
+        crate::game::chests::apply_choice(&mut commands, entity, player, choice, index, &mut items, &mut gear, &mut events);
     }
 }
 
@@ -237,7 +240,7 @@ fn bot_client_choices(
     local: Res<LocalPlayer>,
     me: Query<(&Player, &PendingChoice)>,
     mut choose: MessageWriter<ChooseCard>,
-    mut sent: Local<Vec<crate::shared::items::ItemKind>>,
+    mut sent: Local<Vec<CardOption>>,
 ) {
     let Some((_, choice)) = me.iter().find(|(p, _)| Some(p.slot) == local.slot) else {
         sent.clear();
@@ -280,17 +283,14 @@ struct WorldSnapshot {
     mobs: Vec<Vec3>,
     chests: Vec<(Vec3, ChestKind)>,
     downed: Vec<Vec3>,
-    pickups: Vec<(Vec3, u8)>,
 }
 
 fn snapshot(
     mobs: &Query<(&Mob, &MobState)>,
     chests: &Query<(&Chest, &ChestOpen)>,
     players: &Query<(&PlayerState, &Health)>,
-    pickups: &Query<&WeaponPickup>,
 ) -> WorldSnapshot {
     WorldSnapshot {
-        pickups: pickups.iter().map(|p| (p.pos, p.kind.rarity() as u8)).collect(),
         mobs: mobs.iter().map(|(m, s)| s.pos + Vec3::Y * m.kind.def().height * 0.5).collect(),
         chests: chests.iter().filter(|(_, o)| !o.opened).map(|(c, _)| (c.pos, c.kind)).collect(),
         downed: players.iter().filter(|(_, h)| h.downed).map(|(s, _)| s.sim.mv.pos).collect(),
@@ -305,11 +305,10 @@ fn server_bots(
     mobs: Query<(&Mob, &MobState)>,
     chests: Query<(&Chest, &ChestOpen)>,
     players: Query<(&PlayerState, &Health)>,
-    pickups: Query<&WeaponPickup>,
     info: Single<&MatchInfo>,
     tick: Res<crate::game::SimTick>,
 ) {
-    let world = snapshot(&mobs, &chests, &players, &pickups);
+    let world = snapshot(&mobs, &chests, &players);
     for (mut brain, state, health, wallet, mut queue) in &mut bots {
         // Server bots see the world in the present: no lag compensation.
         queue.view_tick = tick.0;
@@ -322,7 +321,6 @@ fn server_bots(
             mobs: &world.mobs,
             chests: &world.chests,
             downed_allies: &world.downed,
-            pickups: &world.pickups,
         };
         let out = think(&mut brain, &view);
         let seq = queue.last_received + 1;
@@ -347,14 +345,13 @@ fn bot_client_input(
     mobs: Query<(&Mob, &MobState)>,
     chests: Query<(&Chest, &ChestOpen)>,
     players: Query<(&PlayerState, &Health)>,
-    pickups: Query<&WeaponPickup>,
     info: Single<&MatchInfo>,
 ) {
     if !pred.active {
         return;
     }
     let Some((_, health, wallet)) = me.iter().find(|(p, ..)| Some(p.slot) == local.slot) else { return };
-    let world = snapshot(&mobs, &chests, &players, &pickups);
+    let world = snapshot(&mobs, &chests, &players);
     let view = BotView {
         me: &pred.sim,
         downed: health.downed,
@@ -364,7 +361,6 @@ fn bot_client_input(
         mobs: &world.mobs,
         chests: &world.chests,
         downed_allies: &world.downed,
-        pickups: &world.pickups,
     };
     let out = think(&mut brain, &view);
     input.move_axis = out.move_axis;
@@ -376,22 +372,24 @@ fn bot_client_input(
 /// Periodic, human-readable summary of the run (server log).
 fn log_server_summary(
     info: Single<&MatchInfo>,
-    players: Query<(&Player, &Health, &Wallet, &Items, &PlayerState, &crate::game::players::PlayerScore)>,
+    players: Query<(&Player, &Health, &Wallet, &Items, &PlayerState, &crate::game::players::PlayerScore, &Gear)>,
     mobs: Query<&Mob>,
     chests: Res<crate::game::chests::ChestRegistry>,
 ) {
     let line: Vec<String> = players
         .iter()
-        .map(|(p, h, w, i, s, sc)| {
+        .map(|(p, h, w, i, s, sc, g)| {
             format!(
-                "{}[hp {:.0}/{:.0}{} gold {} items {} weapons {} kills {} pos ({:.0},{:.0},{:.0})]",
+                "{}[hp {:.0}/{:.0}{} gold {} items {} {:?} Nv{} autos {:?} kills {} pos ({:.0},{:.0},{:.0})]",
                 p.name,
                 h.hp,
                 h.max,
                 if h.downed { " DOWN" } else { "" },
                 w.gold,
                 i.0.total(),
-                s.sim.arsenal.weapons.len(),
+                g.0.main,
+                g.0.main_up.level + 1,
+                g.0.autos.iter().map(|(a, l)| (a, l.level)).collect::<Vec<_>>(),
                 sc.kills,
                 s.sim.mv.pos.x,
                 s.sim.mv.pos.y,
@@ -472,15 +470,15 @@ mod tests {
     use super::*;
 
     fn view<'a>(me: &'a PlayerSim, mobs: &'a [Vec3], chests: &'a [(Vec3, ChestKind)]) -> BotView<'a> {
-        BotView { me, downed: false, gold: 1000, elapsed: 0.0, chests_opened: 0, mobs, chests, downed_allies: &[], pickups: &[] }
+        BotView { me, downed: false, gold: 1000, elapsed: 0.0, chests_opened: 0, mobs, chests, downed_allies: &[] }
     }
 
     #[test]
     fn bots_pick_the_rarest_card() {
         use crate::shared::items::ItemKind;
         let choice = PendingChoice {
-            chest: ChestKind::Small,
-            options: vec![ItemKind::PowerRounds, ItemKind::Crown, ItemKind::FrogLegs],
+            chest: Some(ChestKind::Small),
+            options: [ItemKind::PowerRounds, ItemKind::Crown, ItemKind::FrogLegs].into_iter().map(CardOption::Item).collect(),
         };
         assert_eq!(bot_pick(&choice), 1);
     }

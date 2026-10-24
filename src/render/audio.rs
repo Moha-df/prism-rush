@@ -13,7 +13,7 @@ use bevy::prelude::*;
 use super::MainCamera;
 use crate::config::AppConfig;
 use crate::shared::rng::Rng;
-use crate::shared::weapons::WeaponKind;
+use crate::shared::build::MainWeapon;
 
 const RATE: u32 = 44_100;
 
@@ -62,7 +62,7 @@ impl Decodable for Synth {
 /// All sound effects of the game.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Sfx {
-    Shot(WeaponKind),
+    Shot(MainWeapon),
     Hit,
     Crit,
     Kill,
@@ -195,18 +195,15 @@ fn sequence(notes: &[(f32, f32)], shape: u8) -> Vec<f32> {
 fn synthesize(sfx: Sfx) -> Vec<f32> {
     match sfx {
         Sfx::Shot(w) => match w {
-            WeaponKind::Pistol => mix(&[(&noise(0.18, 0.5, 28.0, 1), 1.0), (&osc(0.12, 300.0, 90.0, 1, 30.0), 0.5)], 0.7),
-            WeaponKind::Smg => mix(&[(&noise(0.1, 0.6, 40.0, 2), 1.0), (&osc(0.08, 420.0, 150.0, 1, 40.0), 0.4)], 0.55),
-            WeaponKind::Shotgun => mix(&[(&noise(0.45, 0.35, 9.0, 3), 1.0), (&osc(0.3, 120.0, 40.0, 0, 12.0), 0.9)], 0.95),
-            WeaponKind::AssaultRifle => mix(&[(&noise(0.14, 0.45, 30.0, 4), 1.0), (&osc(0.1, 220.0, 70.0, 1, 35.0), 0.5)], 0.65),
-            WeaponKind::Sniper => mix(&[(&noise(0.7, 0.3, 6.0, 5), 1.0), (&osc(0.5, 180.0, 35.0, 0, 7.0), 1.0), (&osc(0.05, 2000.0, 800.0, 2, 60.0), 0.2)], 1.0),
-            WeaponKind::RocketLauncher => mix(&[(&noise(0.6, 0.15, 5.0, 6), 1.0), (&osc(0.4, 90.0, 300.0, 2, 6.0), 0.3)], 0.85),
-            WeaponKind::Revolver => mix(&[(&noise(0.35, 0.4, 12.0, 20), 1.0), (&osc(0.25, 220.0, 55.0, 0, 14.0), 0.9)], 0.9),
-            WeaponKind::BurstRifle => mix(&[(&noise(0.1, 0.55, 35.0, 21), 1.0), (&osc(0.08, 520.0, 200.0, 3, 40.0), 0.5)], 0.6),
-            WeaponKind::Minigun => mix(&[(&noise(0.07, 0.6, 50.0, 22), 1.0), (&osc(0.05, 300.0, 180.0, 1, 50.0), 0.3)], 0.45),
-            WeaponKind::GrenadeLauncher => mix(&[(&noise(0.3, 0.2, 14.0, 23), 0.7), (&osc(0.2, 160.0, 90.0, 0, 15.0), 1.0)], 0.75),
-            WeaponKind::Railgun => mix(&[(&osc(0.7, 2400.0, 120.0, 2, 5.0), 0.7), (&noise(0.5, 0.25, 7.0, 24), 0.8), (&osc(0.5, 90.0, 40.0, 0, 6.0), 0.8)], 1.0),
-            WeaponKind::PlasmaRifle => mix(&[(&osc(0.15, 900.0, 300.0, 3, 25.0), 1.0), (&noise(0.08, 0.7, 40.0, 25), 0.3)], 0.5),
+            // Whoosh + crackle.
+            MainWeapon::FireStaff => mix(&[(&noise(0.3, 0.15, 9.0, 30), 1.0), (&osc(0.25, 180.0, 90.0, 2, 10.0), 0.5)], 0.6),
+            MainWeapon::Bow => mix(&[(&osc(0.12, 140.0, 90.0, 0, 25.0), 1.0), (&noise(0.15, 0.5, 30.0, 31), 0.6)], 0.55),
+            MainWeapon::Revolver => mix(&[(&noise(0.35, 0.4, 12.0, 20), 1.0), (&osc(0.25, 220.0, 55.0, 0, 14.0), 0.9)], 0.8),
+            MainWeapon::Shotgun => mix(&[(&noise(0.45, 0.35, 9.0, 3), 1.0), (&osc(0.3, 120.0, 40.0, 0, 12.0), 0.9)], 0.9),
+            MainWeapon::Sniper => mix(&[(&osc(0.6, 2400.0, 120.0, 2, 5.0), 0.6), (&noise(0.5, 0.25, 7.0, 24), 0.8), (&osc(0.5, 90.0, 40.0, 0, 6.0), 0.8)], 1.0),
+            MainWeapon::LightningStaff => mix(&[(&noise(0.25, 0.9, 14.0, 32), 1.0), (&osc(0.2, 1200.0, 300.0, 3, 15.0), 0.4)], 0.6),
+            MainWeapon::Bananarang => mix(&[(&osc(0.3, 300.0, 600.0, 0, 8.0), 0.8), (&noise(0.25, 0.1, 10.0, 33), 0.6)], 0.5),
+            MainWeapon::HeroSword => mix(&[(&noise(0.25, 0.2, 12.0, 34), 1.0), (&osc(0.2, 900.0, 1400.0, 0, 14.0), 0.35)], 0.6),
         },
         Sfx::Hit => mix(&[(&osc(0.06, 1400.0, 1100.0, 3, 50.0), 1.0)], 0.35),
         Sfx::Crit => mix(&[(&osc(0.12, 1800.0, 2400.0, 3, 25.0), 1.0), (&osc(0.12, 900.0, 1200.0, 0, 25.0), 0.6)], 0.45),
@@ -255,7 +252,7 @@ fn build_sounds(mut bank: ResMut<SoundBank>, mut assets: ResMut<Assets<Synth>>) 
         Sfx::Revived,
         Sfx::Click,
     ];
-    all.extend(WeaponKind::ALL.iter().map(|w| Sfx::Shot(*w)));
+    all.extend(MainWeapon::ALL.iter().map(|w| Sfx::Shot(*w)));
     for sfx in all {
         let samples: Arc<[f32]> = synthesize(sfx).into();
         bank.0.insert(sfx, assets.add(Synth { samples }));
@@ -312,7 +309,7 @@ mod tests {
     #[test]
     fn all_sounds_are_valid() {
         let mut all = vec![Sfx::Hit, Sfx::ChestOpen, Sfx::Explosion, Sfx::BossRoar, Sfx::Downed];
-        all.extend(WeaponKind::ALL.iter().map(|w| Sfx::Shot(*w)));
+        all.extend(MainWeapon::ALL.iter().map(|w| Sfx::Shot(*w)));
         for sfx in all {
             let s = synthesize(sfx);
             assert!(!s.is_empty(), "{sfx:?}");

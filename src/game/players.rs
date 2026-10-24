@@ -9,6 +9,7 @@ use bevy_replicon::prelude::*;
 use super::world::TerrainRes;
 use super::{ServerSet, SimTick};
 use crate::net::protocol::*;
+use crate::shared::build::{main_params, MainParams};
 use crate::shared::items::PlayerStats;
 use crate::shared::movement::{buttons, PlayerInput, DT};
 use crate::shared::sim::simulate_player;
@@ -77,6 +78,8 @@ pub struct PendingShot {
     pub slot: u8,
     pub owner: Option<ClientId>,
     pub shot: Shot,
+    /// Weapon numbers at the time of the shot.
+    pub params: MainParams,
     pub view_tick: u32,
 }
 
@@ -119,6 +122,7 @@ type SimQuery<'a> = (
     &'a mut Intent,
     &'a Health,
     &'a Items,
+    &'a Gear,
 );
 
 /// Consumes queued inputs and runs the authoritative simulation.
@@ -128,12 +132,13 @@ fn simulate_players(
     tick: Res<SimTick>,
     mut shots: ResMut<PendingShots>,
 ) {
-    for (entity, player, owner, mut state, mut queue, mut intent, health, items) in &mut players {
+    for (entity, player, owner, mut state, mut queue, mut intent, health, items, gear) in &mut players {
         intent.interact_pressed = false;
         // Normally one input per tick. If the client is ahead (backlog after a
         // network hiccup), catch up a bit faster.
         let steps = if queue.queue.len() > 4 { 2 } else { 1 };
         let stats = PlayerStats::from_inventory(&items.0);
+        let params = main_params(gear.0.main, &gear.0.main_up, &stats);
         for _ in 0..steps {
             let Some(input) = queue.queue.pop_front() else { break };
             let prev = state.sim.mv.prev_buttons;
@@ -141,7 +146,7 @@ fn simulate_players(
             intent.interact_held = input.held(buttons::INTERACT);
 
             let state = &mut *state;
-            let events = simulate_player(&mut state.sim, &input, &stats, &terrain, health.downed, DT);
+            let events = simulate_player(&mut state.sim, &input, &stats, &params, &terrain, health.downed, DT);
             state.yaw = input.yaw;
             state.pitch = input.pitch;
             state.tick = tick.0;
@@ -151,6 +156,7 @@ fn simulate_players(
                     slot: player.slot,
                     owner: owner.client,
                     shot,
+                    params,
                     view_tick: queue.view_tick,
                 });
             }

@@ -16,10 +16,11 @@ use std::collections::VecDeque;
 use bevy::prelude::*;
 use bevy_replicon::prelude::*;
 
-use super::protocol::{Health, InputBatch, Items, MatchInfo, Player, PlayerState};
+use super::protocol::{Gear, Health, InputBatch, Items, MatchInfo, Player, PlayerState};
 use super::{LocalPlayer, NetRole};
 use crate::game::match_playing;
 use crate::game::world::TerrainRes;
+use crate::shared::build::{main_params, MainWeapon};
 use crate::shared::items::PlayerStats;
 use crate::shared::movement::{PlayerInput, DT, TICK_HZ};
 use crate::shared::sim::{simulate_player, PlayerSim, TickEvents};
@@ -64,6 +65,8 @@ pub struct Prediction {
     pub corrections: u32,
     /// The input of the last simulated tick (for the camera angles).
     pub last_input: PlayerInput,
+    /// Our main weapon (view model, zoom).
+    pub main: Option<MainWeapon>,
 }
 
 /// What happened in our predicted tick (sounds, recoil, tracers).
@@ -126,20 +129,20 @@ fn sync_clock(info: Query<&MatchInfo>, mut clock: ResMut<ServerClock>, time: Res
 /// Finds our own player entity.
 fn local_entity<'a>(
     local: &LocalPlayer,
-    players: impl Iterator<Item = (&'a Player, &'a PlayerState, &'a Health, &'a Items)>,
-) -> Option<(&'a PlayerState, &'a Health, &'a Items)> {
+    players: impl Iterator<Item = (&'a Player, &'a PlayerState, &'a Health, &'a Items, &'a Gear)>,
+) -> Option<(&'a PlayerState, &'a Health, &'a Items, &'a Gear)> {
     let slot = local.slot?;
-    players.filter(|(p, ..)| p.slot == slot).map(|(_, s, h, i)| (s, h, i)).next()
+    players.filter(|(p, ..)| p.slot == slot).map(|(_, s, h, i, g)| (s, h, i, g)).next()
 }
 
 fn reconcile(
     local: Res<LocalPlayer>,
-    players: Query<(&Player, &PlayerState, &Health, &Items)>,
+    players: Query<(&Player, &PlayerState, &Health, &Items, &Gear)>,
     changed: Query<&Player, Changed<PlayerState>>,
     mut pred: ResMut<Prediction>,
     terrain: Res<TerrainRes>,
 ) {
-    let Some((server, health, items)) = local_entity(&local, players.iter()) else {
+    let Some((server, health, items, gear)) = local_entity(&local, players.iter()) else {
         pred.active = false;
         return;
     };
@@ -164,9 +167,10 @@ fn reconcile(
     }
     // Replay the rest on top of the authoritative state.
     let stats = PlayerStats::from_inventory(&items.0);
+    let params = main_params(gear.0.main, &gear.0.main_up, &stats);
     let mut sim = server.sim.clone();
     for input in &pred.history {
-        simulate_player(&mut sim, input, &stats, &terrain, health.downed, DT);
+        simulate_player(&mut sim, input, &stats, &params, &terrain, health.downed, DT);
     }
     let error = pred.sim.mv.pos - sim.mv.pos;
     if error.length() > 0.001 {
@@ -188,7 +192,7 @@ fn predict_local_player(
     mut pred: ResMut<Prediction>,
     mut input_state: ResMut<InputState>,
     local: Res<LocalPlayer>,
-    players: Query<(&Player, &PlayerState, &Health, &Items)>,
+    players: Query<(&Player, &PlayerState, &Health, &Items, &Gear)>,
     terrain: Res<TerrainRes>,
     clock: Res<ServerClock>,
     mut batch: MessageWriter<InputBatch>,
@@ -197,7 +201,7 @@ fn predict_local_player(
     if !pred.active {
         return;
     }
-    let Some((_, health, items)) = local_entity(&local, players.iter()) else { return };
+    let Some((_, health, items, gear)) = local_entity(&local, players.iter()) else { return };
 
     pred.next_seq += 1;
     let input = PlayerInput {
@@ -222,9 +226,11 @@ fn predict_local_player(
     });
 
     let stats = PlayerStats::from_inventory(&items.0);
+    let params = main_params(gear.0.main, &gear.0.main_up, &stats);
     pred.prev_pos = pred.sim.mv.pos;
-    let ev = simulate_player(&mut pred.sim, &input, &stats, &terrain, health.downed, DT);
+    let ev = simulate_player(&mut pred.sim, &input, &stats, &params, &terrain, health.downed, DT);
     pred.last_input = input;
+    pred.main = Some(gear.0.main);
     events.write(PredictedEvents(ev));
 }
 

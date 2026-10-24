@@ -1,20 +1,21 @@
-//! The full per-tick player simulation = movement + weapons.
+//! The full per-tick player simulation = movement + main weapon.
 //!
 //! `PlayerSim` is the predicted / reconciled state. It is a plain struct (not
 //! an ECS component) so it can be copied, compared and replayed freely.
 
 use serde::{Deserialize, Serialize};
 
+use super::build::MainParams;
 use super::items::PlayerStats;
 use super::movement::{simulate_movement, MoveEvents, MoveState, PlayerInput};
-use super::weapons::{simulate_weapons, Arsenal, WeaponEvents};
+use super::weapons::{simulate_gun, Gun, WeaponEvents};
 use super::worldgen::Terrain;
 use bevy::math::Vec3;
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct PlayerSim {
     pub mv: MoveState,
-    pub arsenal: Arsenal,
+    pub gun: Gun,
     /// Last input sequence number applied by the server (acknowledgment).
     pub last_seq: u32,
 }
@@ -27,7 +28,7 @@ pub struct TickEvents {
 
 impl PlayerSim {
     pub fn spawn_at(pos: Vec3) -> Self {
-        Self { mv: MoveState::spawn_at(pos), arsenal: Arsenal::starting(), last_seq: 0 }
+        Self { mv: MoveState::spawn_at(pos), gun: Gun::default(), last_seq: 0 }
     }
 
     pub fn eye(&self) -> Vec3 {
@@ -40,22 +41,14 @@ pub fn simulate_player(
     sim: &mut PlayerSim,
     input: &PlayerInput,
     stats: &PlayerStats,
+    gun: &MainParams,
     terrain: &Terrain,
     downed: bool,
     dt: f32,
 ) -> TickEvents {
-    // Weapons first, with the *previous* buttons for edge detection (the
-    // movement step overwrites `prev_buttons` at its end).
     let eye = sim.eye();
-    let weapons = simulate_weapons(
-        &mut sim.arsenal,
-        input,
-        sim.mv.prev_buttons,
-        stats,
-        eye,
-        !downed && sim.mv.dash_timer <= 0.0,
-        dt,
-    );
+    let can_shoot = !downed && sim.mv.dash_timer <= 0.0;
+    let weapons = simulate_gun(&mut sim.gun, input, gun, eye, can_shoot, dt);
     let mv = simulate_movement(&mut sim.mv, input, &stats.movement, terrain, downed, dt);
     sim.last_seq = input.seq;
     TickEvents { mv, weapons }

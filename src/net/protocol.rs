@@ -12,12 +12,12 @@ use crate::shared::items::{Inventory, ItemKind};
 use crate::shared::mobs::MobKind;
 use crate::shared::movement::PlayerInput;
 use crate::shared::sim::PlayerSim;
-use crate::shared::weapons::WeaponKind;
+use crate::shared::build::{AutoWeapon, Loadout, MainWeapon, OfferCard};
 
 pub const DEFAULT_PORT: u16 = 7777;
 pub const MAX_PLAYERS: usize = 4;
 /// Protocol version: bump when messages change, so old clients are refused.
-pub const PROTOCOL_VERSION: u32 = 2;
+pub const PROTOCOL_VERSION: u32 = 3;
 
 // ---------------------------------------------------------------------------
 // Replicated components
@@ -58,7 +58,13 @@ pub struct Player {
     pub slot: u8,
     pub name: String,
     pub is_bot: bool,
+    /// Main weapon chosen in the lobby (used at the start of the next run).
+    pub main: MainWeapon,
 }
+
+/// The weapons of a player during a run (main weapon + automatic ones).
+#[derive(Component, Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Gear(pub Loadout);
 
 /// Authoritative simulation state of a player (+ tick it was produced at).
 #[derive(Component, Clone, Debug, Default, Serialize, Deserialize)]
@@ -90,11 +96,19 @@ impl Health {
     }
 }
 
-/// Cards offered by an opened chest, waiting for the player's choice.
+/// One card of a choice: an item (chests) or a level-up offer.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum CardOption {
+    Item(ItemKind),
+    Offer(OfferCard),
+}
+
+/// Cards waiting for the player's choice: from a chest (`chest` is set)
+/// or from a team level-up (`chest` is None).
 #[derive(Component, Clone, Debug, Serialize, Deserialize)]
 pub struct PendingChoice {
-    pub chest: ChestKind,
-    pub options: Vec<ItemKind>,
+    pub chest: Option<ChestKind>,
+    pub options: Vec<CardOption>,
 }
 
 #[derive(Component, Clone, Copy, Debug, Default, Serialize, Deserialize)]
@@ -130,14 +144,48 @@ pub enum HazardKind {
     Shockwave,
     /// Marked spot hit by lightning after a delay.
     Lightning,
+    // --- Player automatic weapons (never hurt players) ---
+    /// Mine waiting for a monster to come close.
+    Mine,
+    /// Poison pool hurting monsters standing in it.
+    Poison,
+    /// Flames left behind a running player.
+    Fire,
+    /// Wandering tornado (moves along `vel`).
+    Tornado,
 }
 
-/// A boss attack area, replicated once; clients animate it from its spawn tick.
+/// An attack area, replicated once; clients animate it from its spawn tick.
+/// Boss attacks hurt players; the others are player weapons.
 #[derive(Component, Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct Hazard {
     pub kind: HazardKind,
     pub pos: Vec3,
     pub spawn_tick: u32,
+    pub radius: f32,
+    /// Lifetime in seconds (player weapons).
+    pub life: f32,
+    /// Movement per second (tornados).
+    pub vel: Vec3,
+}
+
+impl Hazard {
+    pub fn boss(kind: HazardKind, pos: Vec3, spawn_tick: u32) -> Self {
+        let radius = if kind == HazardKind::Lightning { LIGHTNING_RADIUS } else { SHOCKWAVE_MAX_RADIUS };
+        Self { kind, pos, spawn_tick, radius, life: 0.0, vel: Vec3::ZERO }
+    }
+
+    pub fn age(&self, tick: f64) -> f32 {
+        ((tick - f64::from(self.spawn_tick)) as f32 / crate::shared::movement::TICK_HZ as f32).max(0.0)
+    }
+
+    pub fn pos_at(&self, tick: f64) -> Vec3 {
+        self.pos + self.vel * self.age(tick).min(self.life.max(0.0))
+    }
+
+    pub fn is_player_weapon(&self) -> bool {
+        !matches!(self.kind, HazardKind::Shockwave | HazardKind::Lightning)
+    }
 }
 
 pub const SHOCKWAVE_SPEED: f32 = 13.0;
@@ -192,20 +240,39 @@ pub struct ChestOpen {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProjectileKind {
-    Rocket,
+    // Monsters
     Acid,
     Bolt,
     BossOrb,
-    Grenade,
-    Plasma,
+    // Player main weapons
+    Fireball,
+    Arrow,
+    Bullet,
+    Pellet,
+    SwordWave,
+    /// Out and back: see `Projectile::pos_at`.
+    Banana,
+    // Player automatic weapons
+    Axe,
 }
 
-/// A weapon lying on the ground (from a weapon crate, or dropped by a
-/// player taking another one). Press E to take it.
-#[derive(Component, Clone, Copy, Debug, Serialize, Deserialize)]
-pub struct WeaponPickup {
-    pub kind: WeaponKind,
-    pub pos: Vec3,
+impl ProjectileKind {
+    /// Projectile shot by a main weapon.
+    pub fn of_main(w: MainWeapon) -> Self {
+        match w {
+            MainWeapon::FireStaff => ProjectileKind::Fireball,
+            MainWeapon::Bow => ProjectileKind::Arrow,
+            MainWeapon::Revolver | MainWeapon::Sniper | MainWeapon::LightningStaff => ProjectileKind::Bullet,
+            MainWeapon::Shotgun => ProjectileKind::Pellet,
+            MainWeapon::Bananarang => ProjectileKind::Banana,
+            MainWeapon::HeroSword => ProjectileKind::SwordWave,
+        }
+    }
+
+    /// Goes through walls and the ground.
+    pub fn ghostly(self) -> bool {
+        matches!(self, ProjectileKind::Banana | ProjectileKind::SwordWave)
+    }
 }
 
 /// Ballistic projectile: replicated once, clients compute its trajectory.
@@ -218,11 +285,24 @@ pub struct Projectile {
     pub spawn_tick: u32,
     /// Shooter slot (players) or 255 (monsters).
     pub owner_slot: u8,
+    /// Visual and hit radius.
+    pub size: f32,
+    /// Boomerangs: time of the round trip (seconds).
+    pub life: f32,
 }
 
 impl Projectile {
+    pub fn age(&self, tick: f64) -> f32 {
+        ((tick - f64::from(self.spawn_tick)) as f32 / crate::shared::movement::TICK_HZ as f32).max(0.0)
+    }
+
     pub fn pos_at(&self, tick: f64) -> Vec3 {
-        let t = ((tick - f64::from(self.spawn_tick)) as f32 / crate::shared::movement::TICK_HZ as f32).max(0.0);
+        let t = self.age(tick);
+        if self.kind == ProjectileKind::Banana {
+            // `vel` is the offset of the farthest point: out and back in `life` seconds.
+            let k = (std::f32::consts::PI * (t / self.life.max(0.01)).min(1.0)).sin();
+            return self.origin + self.vel * k;
+        }
         self.origin + self.vel * t + Vec3::NEG_Y * (0.5 * self.gravity * t * t)
     }
 }
@@ -236,7 +316,15 @@ impl Projectile {
 pub struct Hello {
     pub name: String,
     pub version: u32,
+    /// Main weapon picked in the menu.
+    pub main: MainWeapon,
+    /// Automatic weapons this player has unlocked (they can be offered).
+    pub autos: Vec<AutoWeapon>,
 }
+
+/// Client -> server, in the lobby: change my starting main weapon.
+#[derive(Message, Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct PickMain(pub MainWeapon);
 
 /// Client -> server: the latest inputs. Sent unreliably every tick; we resend
 /// the last few inputs each time so a lost packet costs nothing.
@@ -269,17 +357,18 @@ pub struct Welcome {
     pub reason: String,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Reward {
     Item(ItemKind),
-    Weapon(WeaponKind),
+    Offer(OfferCard),
 }
 
 /// Server -> clients: transient visual/audio effects. Losing one is harmless.
 #[derive(Message, Clone, Debug, Serialize, Deserialize)]
 pub enum Fx {
     Hit { pos: Vec3, amount: u16, crit: bool, killed: bool, by_slot: u8 },
-    Tracer { slot: u8, weapon: WeaponKind, from: Vec3, to: Vec3 },
+    /// Beam of a main weapon (sniper).
+    Tracer { slot: u8, weapon: MainWeapon, from: Vec3, to: Vec3, size: f32 },
     Explosion { pos: Vec3, radius: f32 },
     MobAttack { pos: Vec3, kind: MobKind },
     PlayerHurt { slot: u8, amount: u16 },
@@ -294,6 +383,8 @@ pub enum Fx {
     Heal { pos: Vec3, radius: f32 },
     /// A lightning bolt struck the ground.
     Lightning { pos: Vec3 },
+    /// The aura of a player hurt something (pulse visual).
+    AuraPulse { slot: u8 },
 }
 
 /// Server -> clients: important events (reliable).
@@ -345,13 +436,13 @@ pub fn register_protocol(app: &mut App) {
         .replicate::<Health>()
         .replicate::<Wallet>()
         .replicate::<Items>()
+        .replicate::<Gear>()
         .replicate::<PendingChoice>()
         .replicate_once::<Mob>()
         .replicate::<MobState>()
         .replicate_once::<Chest>()
         .replicate::<ChestOpen>()
         .replicate_once::<Projectile>()
-        .replicate_once::<WeaponPickup>()
         .replicate_once::<XpGem>()
         .replicate_once::<Hazard>()
         .replicate_once::<Statue>()
@@ -360,6 +451,7 @@ pub fn register_protocol(app: &mut App) {
         .add_client_message::<InputBatch>(Channel::Unreliable)
         .add_client_message::<LobbyCommand>(Channel::Ordered)
         .add_client_message::<ChooseCard>(Channel::Ordered)
+        .add_client_message::<PickMain>(Channel::Ordered)
         .add_server_message::<Welcome>(Channel::Ordered)
         .add_server_message::<Fx>(Channel::Unreliable)
         .add_server_message::<GameEvent>(Channel::Ordered);
@@ -433,7 +525,10 @@ mod tests {
             }
             _ => panic!("wrong variant"),
         }
-        let choice = PendingChoice { chest: ChestKind::Large, options: vec![ItemKind::Ankh, ItemKind::Crown, ItemKind::Clover] };
+        let choice = PendingChoice {
+            chest: Some(ChestKind::Large),
+            options: vec![CardOption::Item(ItemKind::Ankh), CardOption::Item(ItemKind::Crown)],
+        };
         assert_eq!(roundtrip(&choice).options, choice.options);
         let summary = GameEvent::GameOver(Box::new(RunSummary {
             duration: 300.0,
@@ -455,9 +550,15 @@ mod tests {
             gravity: 10.0,
             spawn_tick: 0,
             owner_slot: 255,
+            size: 0.3,
+            life: 0.0,
         };
         let one_sec = p.pos_at(60.0);
         assert!((one_sec.x - 10.0).abs() < 1e-3);
         assert!((one_sec.y - 5.0).abs() < 1e-3);
+        // A boomerang is back home after its round trip.
+        let b = Projectile { kind: ProjectileKind::Banana, vel: Vec3::new(20.0, 0.0, 0.0), life: 1.0, ..p };
+        assert!((b.pos_at(30.0).x - 20.0).abs() < 1e-3);
+        assert!(b.pos_at(60.0).length() < 1e-3);
     }
 }

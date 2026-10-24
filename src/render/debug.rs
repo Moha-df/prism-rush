@@ -28,16 +28,27 @@ fn demo_scene(
     time: Res<Time<Real>>,
     mut done: Local<bool>,
     role: Res<crate::net::NetRole>,
-    mut players: Query<(Entity, &crate::net::protocol::Player, &crate::net::protocol::PlayerState, &mut crate::net::protocol::Items)>,
+    mut players: Query<(
+        Entity,
+        &crate::net::protocol::Player,
+        &crate::net::protocol::PlayerState,
+        &mut crate::net::protocol::Items,
+        &mut crate::net::protocol::Gear,
+    )>,
 ) {
-    use crate::net::protocol::{PendingChoice, WeaponPickup};
-    use crate::shared::economy::ChestKind;
+    use crate::shared::build::{AutoWeapon, WeaponLevel};
     use crate::shared::items::ItemKind;
     if *done || time.elapsed_secs() < 5.0 || !role.is_authority() {
         return;
     }
-    let Some((entity, _, state, mut items)) = players.iter_mut().find(|(_, p, ..)| p.slot == 0) else { return };
+    let Some((entity, _, state, mut items, mut gear)) = players.iter_mut().find(|(_, p, ..)| p.slot == 0) else { return };
     *done = true;
+    // Show the automatic weapons.
+    for a in [AutoWeapon::Aura, AutoWeapon::Orbs, AutoWeapon::Lightning] {
+        if !gear.0.has_auto(a) {
+            gear.0.autos.push((a, WeaponLevel { level: 1, ..Default::default() }));
+        }
+    }
     for item in [ItemKind::FrogLegs, ItemKind::FrogLegs, ItemKind::Jetpack, ItemKind::VampireFangs, ItemKind::Crown, ItemKind::TeslaCoil] {
         items.0.add(item);
     }
@@ -55,32 +66,26 @@ fn demo_scene(
         crate::net::protocol::Statue { spot_id: 42, pos: state.sim.mv.pos + forward * 8.0 - right * 6.0, boss: MobKind::HiveQueen },
         crate::net::protocol::StatueUsed(false),
     ));
-    commands.spawn((
-        bevy_replicon::prelude::Replicated,
-        WeaponPickup { kind: crate::shared::weapons::WeaponKind::Railgun, pos: state.sim.mv.pos + forward * 3.0 + Vec3::Y * 0.9 },
-    ));
     commands.entity(entity).insert(DemoCards(8.0));
-    let _ = PendingChoice {
-        chest: ChestKind::Large,
-        options: vec![],
-    };
 }
 
 /// Opens the demo card choice a few seconds after the gallery.
 #[derive(Component)]
 struct DemoCards(f32);
 
-fn demo_cards(mut commands: Commands, time: Res<Time>, mut q: Query<(Entity, &mut DemoCards)>) {
-    use crate::net::protocol::PendingChoice;
-    use crate::shared::economy::ChestKind;
-    use crate::shared::items::ItemKind;
-    for (e, mut d) in &mut q {
+fn demo_cards(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut q: Query<(Entity, &mut DemoCards, &crate::net::protocol::Gear, &crate::net::protocol::Items)>,
+) {
+    use crate::net::protocol::{CardOption, PendingChoice};
+    use crate::shared::build::{roll_offers, AutoWeapon};
+    for (e, mut d, gear, items) in &mut q {
         d.0 -= time.delta_secs();
         if d.0 <= 0.0 {
-            commands.entity(e).remove::<DemoCards>().insert(PendingChoice {
-                chest: ChestKind::Large,
-                options: vec![ItemKind::DragonHeart, ItemKind::FrogLegs, ItemKind::EnergyShield, ItemKind::GatlingSoul],
-            });
+            let mut rng = crate::shared::rng::Rng::new(7);
+            let options = roll_offers(&gear.0, &items.0, &AutoWeapon::ALL, 4.0, 3, &mut rng).into_iter().map(CardOption::Offer).collect();
+            commands.entity(e).remove::<DemoCards>().insert(PendingChoice { chest: None, options });
         }
     }
 }

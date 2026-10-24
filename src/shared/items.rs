@@ -7,6 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::build::{tome_points, Tome, TOME_COUNT};
 use super::economy::ChestKind;
 use super::movement::MoveStats;
 use super::rng::Rng;
@@ -42,17 +43,34 @@ impl Category {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum Rarity {
     Common,
+    /// Level-up upgrades only (no item has this rarity).
+    Uncommon,
     Rare,
     Epic,
     Legendary,
 }
 
 impl Rarity {
+    /// Rarities items can have (chest draws).
     pub const ALL: [Rarity; 4] = [Rarity::Common, Rarity::Rare, Rarity::Epic, Rarity::Legendary];
+    /// All 5 tiers (level-up upgrades).
+    pub const TIERS: [Rarity; 5] = [Rarity::Common, Rarity::Uncommon, Rarity::Rare, Rarity::Epic, Rarity::Legendary];
+
+    /// Megabonk-style multiplier applied to an upgrade's value.
+    pub fn factor(self) -> f32 {
+        match self {
+            Rarity::Common => 1.0,
+            Rarity::Uncommon => 1.2,
+            Rarity::Rare => 1.4,
+            Rarity::Epic => 1.6,
+            Rarity::Legendary => 2.0,
+        }
+    }
 
     pub fn name(self) -> &'static str {
         match self {
             Rarity::Common => "Commun",
+            Rarity::Uncommon => "Peu commun",
             Rarity::Rare => "Rare",
             Rarity::Epic => "Épique",
             Rarity::Legendary => "Légendaire",
@@ -62,6 +80,7 @@ impl Rarity {
     pub fn color(self) -> [f32; 3] {
         match self {
             Rarity::Common => [0.8, 0.82, 0.86],
+            Rarity::Uncommon => [0.35, 0.9, 0.4],
             Rarity::Rare => [0.3, 0.65, 1.0],
             Rarity::Epic => [0.75, 0.35, 1.0],
             Rarity::Legendary => [1.0, 0.65, 0.1],
@@ -283,10 +302,10 @@ impl ItemKind {
 /// Draws the cards offered by a chest: `count` distinct items. Each card
 /// first rolls a rarity (chest odds, improved by luck), then an item of that
 /// rarity not already offered.
-pub fn roll_cards(chest: ChestKind, luck: u32, count: usize, rng: &mut Rng) -> Vec<ItemKind> {
+pub fn roll_cards(chest: ChestKind, luck: f32, count: usize, rng: &mut Rng) -> Vec<ItemKind> {
     let mut weights = Rarity::weights(chest);
     // Each Clover makes rarer cards more likely.
-    let boost = 1.0 + 0.4 * luck as f32;
+    let boost = 1.0 + 0.4 * luck;
     weights[1] *= boost;
     weights[2] *= boost * boost;
     weights[3] *= boost * boost;
@@ -306,11 +325,13 @@ pub fn roll_cards(chest: ChestKind, luck: u32, count: usize, rng: &mut Rng) -> V
 pub struct Inventory {
     #[serde(with = "counts_serde")]
     pub counts: [u8; ITEM_COUNT],
+    /// Tome points in tenths (see `build::Tome`).
+    pub tomes: [u16; TOME_COUNT],
 }
 
 impl Default for Inventory {
     fn default() -> Self {
-        Self { counts: [0; ITEM_COUNT] }
+        Self { counts: [0; ITEM_COUNT], tomes: [0; TOME_COUNT] }
     }
 }
 
@@ -389,7 +410,7 @@ pub struct PlayerStats {
     pub dash_invulnerable: bool,
     /// Personal chest price multiplier.
     pub price_mult: f32,
-    pub luck: u32,
+    pub luck: f32,
     /// Fraction of max HP healed at the end of each wave.
     pub wave_heal: f32,
     pub cards: usize,
@@ -397,6 +418,12 @@ pub struct PlayerStats {
     pub attraction: f32,
     /// XP gain multiplier.
     pub xp_mult: f32,
+    /// V3 tome stats.
+    pub size_mult: f32,
+    pub proj_speed_mult: f32,
+    pub duration_mult: f32,
+    /// Extra projectiles for every weapon.
+    pub quantity: u32,
 }
 
 pub const BASE_MAX_HP: f32 = 100.0;
@@ -406,9 +433,10 @@ impl PlayerStats {
     pub fn from_inventory(inv: &Inventory) -> Self {
         use ItemKind::*;
         let n = |i: ItemKind| inv.count(i) as f32;
+        let t = |tome: Tome| tome_points(inv, tome);
         Self {
             movement: MoveStats {
-                speed_mult: 1.0 + 0.10 * n(SwiftBoots),
+                speed_mult: (1.0 + 0.10 * n(SwiftBoots)) * (1.0 + 0.08 * t(Tome::Agility)),
                 air_jumps: 1 + inv.counts[FrogLegs.index()],
                 dash_charges: 1 + inv.counts[Thruster.index()],
                 jump_mult: 1.0 + 0.15 * n(Jetpack),
@@ -416,19 +444,19 @@ impl PlayerStats {
                 slide_mult: 1.0 + 0.25 * n(SlideWax),
                 air_control_mult: 1.0 + 0.4 * n(FeatherCape),
             },
-            max_hp: BASE_MAX_HP + 25.0 * n(VitalHeart) + 60.0 * n(DragonHeart),
-            regen: BASE_REGEN + 1.5 * n(RegenMoss) + 4.0 * n(DragonHeart),
-            armor: 12.0 * n(ArmorPlate),
+            max_hp: BASE_MAX_HP + 25.0 * n(VitalHeart) + 60.0 * n(DragonHeart) + 25.0 * t(Tome::Health),
+            regen: BASE_REGEN + 1.5 * n(RegenMoss) + 4.0 * n(DragonHeart) + 1.5 * t(Tome::Regen),
+            armor: 12.0 * n(ArmorPlate) + 12.0 * t(Tome::Armor),
             shield_max: 25.0 * n(EnergyShield),
-            damage_mult: 1.0 + 0.12 * n(PowerRounds),
-            fire_rate_mult: 1.0 + 0.10 * n(HairTrigger) + 0.35 * n(GatlingSoul),
+            damage_mult: (1.0 + 0.12 * n(PowerRounds)) * (1.0 + 0.08 * t(Tome::Damage)),
+            fire_rate_mult: (1.0 + 0.10 * n(HairTrigger) + 0.35 * n(GatlingSoul)) * (1.0 + 0.075 * t(Tome::Cooldown)),
             reload_speed_mult: 1.0 + 0.2 * n(QuickHands),
             mag_mult: 1.0 + 0.25 * n(ExtendedMag) + 0.15 * n(GatlingSoul),
             // Diminishing returns so it never reaches 100%.
-            crit_chance: 1.0 - 0.93f32.powf(n(CritLens)),
+            crit_chance: 1.0 - 0.93f32.powf(n(CritLens)) * (1.0 - 0.07 * t(Tome::Precision)).max(0.0),
             crit_mult: 2.0 + 0.6 * n(Executioner),
             lifesteal: 0.03 * n(VampireFangs),
-            gold_mult: 1.0 + 0.15 * n(LuckyCoin),
+            gold_mult: 1.0 + 0.15 * n(LuckyCoin) + 0.12 * t(Tome::Gold),
             explode_chance: 1.0 - 0.9f32.powf(n(UnstableRounds)),
             tesla_chance: 1.0 - 0.88f32.powf(n(TeslaCoil)),
             hollow_point: 0.3 * n(HollowPoint),
@@ -437,11 +465,15 @@ impl PlayerStats {
             thorns: 0.4 * n(Thorns),
             dash_invulnerable: inv.count(PhaseStep) > 0,
             price_mult: 0.9f32.powf(n(TreasureMap)).max(0.5),
-            luck: inv.count(Clover),
+            luck: n(Clover) + t(Tome::Luck),
             wave_heal: (0.35 * n(Medkit)).min(1.0),
             cards: 3 + inv.count(Crown) as usize,
-            attraction: 1.0,
-            xp_mult: 1.0,
+            attraction: 1.0 + 0.6 * t(Tome::Attraction),
+            xp_mult: 1.0 + 0.1 * t(Tome::Experience),
+            size_mult: 1.0 + 0.1 * t(Tome::Size),
+            proj_speed_mult: 1.0 + 0.15 * t(Tome::ProjectileSpeed),
+            duration_mult: 1.0 + 0.15 * t(Tome::Duration),
+            quantity: t(Tome::Quantity).floor() as u32,
         }
     }
 
@@ -547,7 +579,7 @@ mod tests {
     fn cards_are_distinct_and_counted() {
         let mut rng = Rng::new(9);
         for _ in 0..500 {
-            let cards = roll_cards(ChestKind::Large, 0, 4, &mut rng);
+            let cards = roll_cards(ChestKind::Large, 0.0, 4, &mut rng);
             assert_eq!(cards.len(), 4);
             for (i, c) in cards.iter().enumerate() {
                 assert!(!cards[..i].contains(c));
@@ -559,7 +591,7 @@ mod tests {
     fn legendary_chests_only_give_rare_stuff() {
         let mut rng = Rng::new(10);
         for _ in 0..300 {
-            for c in roll_cards(ChestKind::Legendary, 0, 3, &mut rng) {
+            for c in roll_cards(ChestKind::Legendary, 0.0, 3, &mut rng) {
                 assert!(c.rarity() >= Rarity::Epic, "{c:?}");
             }
         }
@@ -567,14 +599,14 @@ mod tests {
 
     #[test]
     fn luck_improves_rarity() {
-        let score = |luck: u32| {
+        let score = |luck: f32| {
             let mut rng = Rng::new(11);
             (0..2000)
                 .flat_map(|_| roll_cards(ChestKind::Small, luck, 3, &mut rng))
                 .filter(|c| c.rarity() >= Rarity::Epic)
                 .count()
         };
-        assert!(score(3) > score(0) * 2);
+        assert!(score(3.0) > score(0.0) * 2);
     }
 
     #[test]

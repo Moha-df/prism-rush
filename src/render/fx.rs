@@ -11,11 +11,11 @@ use super::palette;
 use super::MainCamera;
 use crate::game::world::TerrainRes;
 use crate::net::client::{InputState, PredictedEvents, Prediction};
-use crate::net::protocol::{player_color, Fx, GameEvent, Mob, MobState};
+use crate::net::protocol::{player_color, Fx, GameEvent, Gear, Mob, MobState};
 use crate::net::LocalPlayer;
 use crate::shared::mobs::MobKind;
 use crate::shared::rng::Rng;
-use crate::shared::weapons::WeaponKind;
+use crate::shared::build::{main_params, Delivery, MainWeapon};
 
 #[derive(Component)]
 struct Particle {
@@ -77,6 +77,7 @@ impl Plugin for FxPlugin {
                     on_server_fx,
                     on_game_events,
                     on_predicted_events,
+                    on_predicted_moves,
                     update_particles,
                     update_tracers,
                     update_flash_lights,
@@ -178,11 +179,21 @@ fn damage_number(commands: &mut Commands, pos: Vec3, amount: u16, crit: bool, rn
     ));
 }
 
-fn weapon_tracer_color(kind: WeaponKind) -> Color {
+fn weapon_tracer_color(kind: MainWeapon) -> Color {
     match kind {
-        WeaponKind::Sniper => palette::GLOW_CYAN,
-        WeaponKind::RocketLauncher => palette::GLOW_ORANGE,
+        MainWeapon::Sniper | MainWeapon::LightningStaff => palette::GLOW_CYAN,
+        MainWeapon::FireStaff => palette::GLOW_ORANGE,
         _ => Color::srgb(1.0, 0.85, 0.5),
+    }
+}
+
+/// Muzzle flash color of a main weapon.
+fn flash_color(kind: MainWeapon) -> Color {
+    match kind {
+        MainWeapon::FireStaff => palette::GLOW_ORANGE,
+        MainWeapon::LightningStaff | MainWeapon::Sniper | MainWeapon::HeroSword => palette::GLOW_CYAN,
+        MainWeapon::Bananarang => palette::GOLD,
+        _ => Color::srgb(1.0, 0.75, 0.4),
     }
 }
 
@@ -234,10 +245,10 @@ fn on_server_fx(
                     sfx.write(PlaySfx::ui(if *crit { Sfx::Crit } else { Sfx::Hit }));
                 }
             }
-            Fx::Tracer { slot, weapon, from, to } => {
-                // Other players' shots (ours are predicted locally).
+            Fx::Tracer { slot, weapon, from, to, size } => {
+                // Other players' beams (ours are predicted locally).
                 let _ = player_color(*slot);
-                tracer(&mut commands, &mut cache, &mut meshes, &mut materials, *from, *to, weapon_tracer_color(*weapon), 0.04);
+                tracer(&mut commands, &mut cache, &mut meshes, &mut materials, *from, *to, weapon_tracer_color(*weapon), size * 0.25);
                 sfx.write(PlaySfx { volume: 0.7, ..PlaySfx::at(Sfx::Shot(*weapon), *from) });
             }
             Fx::Explosion { pos, radius } => {
@@ -305,6 +316,7 @@ fn on_server_fx(
                 tracer(&mut commands, &mut cache, &mut meshes, &mut materials, *from, *to, palette::GLOW_CYAN, 0.08);
                 burst(&mut commands, &mut cache, &mut meshes, &mut materials, rng, *to, 6, palette::GLOW_CYAN, 6.0, 5.0, 0.06, 0.25, 0.0);
             }
+            Fx::AuraPulse { .. } => {}
             Fx::Warp { from, to } => {
                 burst(&mut commands, &mut cache, &mut meshes, &mut materials, rng, *from + Vec3::Y, 12, palette::GLOW_MAGENTA, 4.0, 4.0, 0.12, 0.5, -1.0);
                 burst(&mut commands, &mut cache, &mut meshes, &mut materials, rng, *to + Vec3::Y, 16, palette::GLOW_MAGENTA, 4.0, 5.0, 0.12, 0.6, -1.0);
@@ -388,23 +400,28 @@ fn on_predicted_events(
     input: Res<InputState>,
     terrain: Res<TerrainRes>,
     mobs: Query<(&Mob, &Transform), With<MobState>>,
+    me: Query<(&crate::net::protocol::Player, &Gear, &crate::net::protocol::Items)>,
+    local: Res<LocalPlayer>,
 ) {
     let rng = &mut rng.0;
+    let params = me
+        .iter()
+        .find(|(p, ..)| Some(p.slot) == local.slot)
+        .map(|(_, g, i)| main_params(g.0.main, &g.0.main_up, &crate::shared::items::PlayerStats::from_inventory(&i.0)));
     for PredictedEvents(ev) in events.read() {
         let w = &ev.weapons;
         if let Some(kind) = w.fired {
             sfx.write(PlaySfx { volume: 0.8, ..PlaySfx::ui(Sfx::Shot(kind)) });
             let dir = pred.last_input.aim_dir();
-            flash_light(&mut commands, pred.sim.eye() + dir * 1.0, Color::srgb(1.0, 0.75, 0.4), 120_000.0, 8.0, 0.05);
+            flash_light(&mut commands, pred.sim.eye() + dir * 1.0, flash_color(kind), 120_000.0, 8.0, 0.05);
         }
+        // Projectiles are real (replicated) entities; only beams are drawn here.
+        let Some(p) = params.filter(|p| p.delivery == Delivery::Beam) else { continue };
         // Tracers start at the (approximate) muzzle on screen.
         let fwd = Quat::from_euler(EulerRot::YXZ, input.yaw, input.pitch, 0.0);
         let muzzle = pred.sim.eye() + fwd * Vec3::new(0.2, -0.15, -0.7);
         for shot in w.shots.iter().take(9) {
-            if shot.weapon == WeaponKind::RocketLauncher {
-                continue; // the rocket itself is the visual
-            }
-            let range = shot.weapon.def().range;
+            let range = p.range;
             let mut dist = terrain.raycast(shot.origin, shot.dir, range).unwrap_or(range);
             // Stop the tracer on monsters too (approximate, visual only).
             for (mob, t) in &mobs {
@@ -417,23 +434,28 @@ fn on_predicted_events(
                 }
             }
             let end = shot.origin + shot.dir * dist;
-            tracer(&mut commands, &mut cache, &mut meshes, &mut materials, muzzle, end, weapon_tracer_color(shot.weapon), 0.03);
+            tracer(&mut commands, &mut cache, &mut meshes, &mut materials, muzzle, end, weapon_tracer_color(shot.weapon), p.size * 0.25);
             if dist < range {
                 burst(&mut commands, &mut cache, &mut meshes, &mut materials, rng, end, 3, Color::srgb(1.0, 0.85, 0.5), 4.0, 4.0, 0.05, 0.2, 8.0);
             }
         }
-        if w.reload_started {
-            sfx.write(PlaySfx::ui(Sfx::Reload));
-        }
-        if w.reload_finished {
-            sfx.write(PlaySfx { volume: 0.7, ..PlaySfx::ui(Sfx::Reload) });
-        }
-        if w.dry_fire {
-            sfx.write(PlaySfx::ui(Sfx::Empty));
-        }
-        if w.switched {
-            sfx.write(PlaySfx::ui(Sfx::Switch));
-        }
+    }
+}
+
+/// Movement feedback of our own player (jumps, landings, dashes).
+#[allow(clippy::too_many_arguments)]
+fn on_predicted_moves(
+    mut commands: Commands,
+    mut events: MessageReader<PredictedEvents>,
+    mut cache: ResMut<PrimCache>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut rng: ResMut<FxRng>,
+    mut sfx: MessageWriter<PlaySfx>,
+    pred: Res<Prediction>,
+) {
+    let rng = &mut rng.0;
+    for PredictedEvents(ev) in events.read() {
         let m = &ev.mv;
         let feet = pred.sim.mv.pos;
         if m.jumped || m.air_jumped {

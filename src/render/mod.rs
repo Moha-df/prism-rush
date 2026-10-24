@@ -3,6 +3,7 @@
 pub mod anim;
 pub mod atmosphere;
 pub mod audio;
+pub mod autos;
 pub mod avatars;
 pub mod camera;
 pub mod debug;
@@ -55,6 +56,7 @@ impl Plugin for RenderPlugin {
                 debug::DebugPlugin,
                 icons::IconsPlugin,
                 atmosphere::AtmospherePlugin,
+                autos::AutoVisualsPlugin,
             ));
     }
 }

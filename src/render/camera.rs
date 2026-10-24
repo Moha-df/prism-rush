@@ -275,7 +275,7 @@ fn update_camera(
     let sprint = if speed > 9.0 { 6.0 } else { 0.0 };
     let zoom = mouse.pressed(MouseButton::Right) && !downed;
     let target_fov = if zoom {
-        let sniper = pred.sim.arsenal.current_kind() == crate::shared::weapons::WeaponKind::Sniper;
+        let sniper = pred.main == Some(crate::shared::build::MainWeapon::Sniper);
         if sniper { 25.0 } else { config.fov * 0.65 }
     } else {
         config.fov + sprint + fx.fov_kick

@@ -388,7 +388,7 @@ fn mob_ai(
                                 // Ring on the ground: jump over it!
                                 commands.spawn((
                                     Replicated,
-                                    Hazard { kind: HazardKind::Shockwave, pos: state.pos, spawn_tick: tick.0 },
+                                    Hazard::boss(HazardKind::Shockwave, state.pos, tick.0),
                                     HazardServer { damage: damage_amount, hit: Vec::new() },
                                 ));
                             } else {
@@ -401,7 +401,7 @@ fn mob_ai(
                                     let pos = Vec3::new(x, terrain.wgen.ground_height(x, z), z);
                                     commands.spawn((
                                         Replicated,
-                                        Hazard { kind: HazardKind::Lightning, pos, spawn_tick: tick.0 },
+                                        Hazard::boss(HazardKind::Lightning, pos, tick.0),
                                         HazardServer { damage: damage_amount, hit: Vec::new() },
                                     ));
                                 }
@@ -553,8 +553,17 @@ fn spawn_enemy_projectile(
 ) {
     commands.spawn((
         Replicated,
-        Projectile { kind, origin, vel, gravity, spawn_tick: tick, owner_slot: 255 },
-        ProjectileServer { damage, splash, by: None, hurts_players: true, ttl: 5.0 },
+        Projectile {
+            kind,
+            origin,
+            vel,
+            gravity,
+            spawn_tick: tick,
+            owner_slot: 255,
+            size: if kind == ProjectileKind::BossOrb { 0.9 } else { 0.35 },
+            life: 0.0,
+        },
+        ProjectileServer::enemy(damage, splash, 5.0),
     ));
 }
 
