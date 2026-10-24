@@ -381,6 +381,18 @@ fn on_game_events(
             GameEvent::SwarmStarted { .. } => {
                 sfx.write(PlaySfx::ui(Sfx::BossRoar));
             }
+            GameEvent::PowerupTaken { pos, .. } => {
+                burst(&mut commands, &mut cache, &mut meshes, &mut materials, rng, *pos, 24, palette::GOLD, 5.0, 7.0, 0.1, 0.8, 4.0);
+                flash_light(&mut commands, *pos + Vec3::Y, palette::GOLD, 600_000.0, 14.0, 0.5);
+                sfx.write(PlaySfx::ui(Sfx::ChestOpen));
+            }
+            GameEvent::ShrineCharged { pos } => {
+                let p = *pos + Vec3::Y;
+                burst(&mut commands, &mut cache, &mut meshes, &mut materials, rng, p, 40, palette::GLOW_CYAN, 6.0, 8.0, 0.12, 1.2, -2.0);
+                tracer(&mut commands, &mut cache, &mut meshes, &mut materials, p, p + Vec3::Y * 30.0, palette::GLOW_CYAN, 0.6);
+                flash_light(&mut commands, p + Vec3::Y, palette::GLOW_CYAN, 2_000_000.0, 25.0, 0.8);
+                sfx.write(PlaySfx::ui(Sfx::Revived));
+            }
             GameEvent::GameOver(_) => {}
         }
     }

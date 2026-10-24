@@ -205,6 +205,57 @@ pub struct Statue {
 #[derive(Component, Clone, Copy, Debug, Default, Serialize, Deserialize)]
 pub struct StatueUsed(pub bool);
 
+/// Charge shrine: stand in its circle until it is full, everyone inside
+/// gets a free level-up (Megabonk-like).
+#[derive(Component, Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct Shrine {
+    pub spot_id: u64,
+    pub pos: Vec3,
+}
+
+pub const SHRINE_RADIUS: f32 = 4.5;
+/// Seconds to charge a shrine alone (faster with more players inside).
+pub const SHRINE_TIME: f32 = 7.0;
+
+/// Mutable shrine state: charge in [0, 1], then used.
+#[derive(Component, Clone, Copy, Debug, Default, Serialize, Deserialize)]
+pub struct ShrineCharge {
+    pub charge: f32,
+    pub used: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum PowerupKind {
+    /// Pulls every XP gem of the map to the team.
+    Magnet,
+    /// Heals the whole team.
+    Heal,
+    /// Blasts every monster around (bosses resist).
+    Bomb,
+    /// Run faster for a while.
+    Haste,
+}
+
+impl PowerupKind {
+    pub const ALL: [PowerupKind; 4] = [PowerupKind::Magnet, PowerupKind::Heal, PowerupKind::Bomb, PowerupKind::Haste];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            PowerupKind::Magnet => "Aimant : toute l'XP attirée !",
+            PowerupKind::Heal => "Soin d'équipe !",
+            PowerupKind::Bomb => "Bombe !",
+            PowerupKind::Haste => "Hâte !",
+        }
+    }
+}
+
+/// A power-up dropped by a monster: walk on it to take it.
+#[derive(Component, Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct Powerup {
+    pub kind: PowerupKind,
+    pub pos: Vec3,
+}
+
 /// What a monster is doing, for animations.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MobAnim {
@@ -408,6 +459,8 @@ pub enum GameEvent {
     LevelUp { level: u32 },
     /// The Final Swarm begins (white ghosts), or black ghosts join.
     SwarmStarted { black: bool },
+    PowerupTaken { slot: u8, kind: PowerupKind, pos: Vec3 },
+    ShrineCharged { pos: Vec3 },
     GameOver(Box<RunSummary>),
 }
 
@@ -451,6 +504,9 @@ pub fn register_protocol(app: &mut App) {
         .replicate_once::<Hazard>()
         .replicate_once::<Statue>()
         .replicate::<StatueUsed>()
+        .replicate_once::<Shrine>()
+        .replicate::<ShrineCharge>()
+        .replicate_once::<Powerup>()
         .add_client_message::<Hello>(Channel::Ordered)
         .add_client_message::<InputBatch>(Channel::Unreliable)
         .add_client_message::<LobbyCommand>(Channel::Ordered)

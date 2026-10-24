@@ -693,6 +693,8 @@ fn apply_mob_damage(
                 wallet.gold += gold;
                 score.gold_earned += gold;
             }
+            let mut drop_rng = Rng::new(u64::from(tick.0) ^ hit.target.to_bits());
+            crate::game::pickups::maybe_drop_powerup(&mut commands, mob_state.pos, mob.elite, mob.kind.is_boss(), &mut drop_rng);
             // XP gem for the team (elites and bosses are worth more).
             let xp = mob.kind.def().gold * if mob.elite { 3.0 } else { 1.0 } * if mob.kind.is_boss() { 5.0 } else { 1.0 };
             crate::game::progress::drop_gem(&mut commands, gem_count, mob_state.pos, xp, &mut info);

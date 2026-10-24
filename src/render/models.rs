@@ -16,7 +16,7 @@ use bevy::prelude::*;
 
 use super::model::{AnimTag, Part};
 use super::palette::*;
-use crate::net::protocol::ProjectileKind;
+use crate::net::protocol::{PowerupKind, ProjectileKind, SHRINE_RADIUS};
 use crate::shared::economy::ChestKind;
 use crate::shared::mobs::MobKind;
 use crate::shared::build::{AutoWeapon, MainWeapon};
@@ -742,6 +742,52 @@ fn axe() -> Part {
         .with(Part::cylinder(0.12, 1.2).color(WOOD))
         .with(Part::prism(0.7, 0.5, 0.08).at(0.28, 0.4, 0.0).rot_z(-90.0).color(METAL_LIGHT))
         .with(Part::cube(0.06, 0.5, 0.1).at(0.6, 0.4, 0.0).color(GLOW_ORANGE).glow(2.5))
+}
+
+/// A charge shrine: a ring of glowing stones around a hollow pillar.
+pub fn shrine() -> Part {
+    let mut p = Part::pivot()
+        .with(Part::cylinder(1.6, 0.3).at(0.0, 0.15, 0.0).color(STONE))
+        .with(Part::frustum(1.2, 0.5).at(0.0, 0.5, 0.0).color(STONE_DARK))
+        .with(Part::torus(1.1, 0.12).at(0.0, 3.2, 0.0).color(GLOW_CYAN).glow(4.0).tag(AnimTag::Spin(1.5)))
+        .with(Part::ico(0.5, 0.5, 0.5).at(0.0, 3.6, 0.0).color(CRYSTAL_CYAN).glow(4.0).tag(AnimTag::Bob));
+    // Four thin posts holding the crown.
+    for i in 0..4 {
+        let a = i as f32 * std::f32::consts::FRAC_PI_2 + 0.4;
+        p = p.with(Part::cube(0.14, 2.8, 0.14).at(a.cos() * 0.55, 1.6, a.sin() * 0.55).color(STONE));
+    }
+    // The circle to stand in: small glowing stones on its edge.
+    for i in 0..20 {
+        let a = i as f32 / 20.0 * std::f32::consts::TAU;
+        let r = SHRINE_RADIUS;
+        p = p.with(Part::ico(0.3, 0.22, 0.3).at(a.cos() * r, 0.1, a.sin() * r).color(GLOW_CYAN).glow(2.5));
+    }
+    p
+}
+
+/// A floating power-up.
+pub fn powerup(kind: PowerupKind) -> Part {
+    let icon = match kind {
+        PowerupKind::Magnet => Part::pivot()
+            .with(Part::cube(0.18, 0.5, 0.18).at(-0.22, -0.05, 0.0).color(rgb(0.9, 0.15, 0.15)))
+            .with(Part::cube(0.18, 0.5, 0.18).at(0.22, -0.05, 0.0).color(rgb(0.9, 0.15, 0.15)))
+            .with(Part::cube(0.62, 0.18, 0.18).at(0.0, 0.25, 0.0).color(rgb(0.9, 0.15, 0.15)))
+            .with(Part::cube(0.18, 0.14, 0.18).at(-0.22, -0.36, 0.0).color(METAL_LIGHT).glow(1.5))
+            .with(Part::cube(0.18, 0.14, 0.18).at(0.22, -0.36, 0.0).color(METAL_LIGHT).glow(1.5)),
+        PowerupKind::Heal => Part::pivot()
+            .with(Part::cube(0.2, 0.62, 0.2).color(GLOW_TOXIC).glow(3.0))
+            .with(Part::cube(0.62, 0.2, 0.2).color(GLOW_TOXIC).glow(3.0)),
+        PowerupKind::Bomb => Part::pivot()
+            .with(Part::sphere(0.55).color(METAL_DARK))
+            .with(Part::cylinder(0.12, 0.2).at(0.0, 0.32, 0.0).color(METAL_LIGHT))
+            .with(Part::sphere(0.12).at(0.0, 0.45, 0.0).color(GLOW_ORANGE).glow(6.0).tag(AnimTag::Pulse)),
+        PowerupKind::Haste => Part::pivot()
+            .with(Part::prism(0.2, 0.5, 0.12).at(0.05, 0.18, 0.0).rot_z(-20.0).color(GOLD).glow(3.0))
+            .with(Part::prism(0.2, 0.5, 0.12).at(-0.05, -0.18, 0.0).rot_z(160.0).color(GOLD).glow(3.0)),
+    };
+    Part::pivot()
+        .with(Part::cylinder(1.0, 0.03).at(0.0, -0.55, 0.0).color(GOLD).glow(1.5))
+        .with(Part::pivot().tag(AnimTag::Bob).with(Part::pivot().tag(AnimTag::Spin(2.0)).with(icon)))
 }
 
 /// Scales a whole part tree (sizes and positions).

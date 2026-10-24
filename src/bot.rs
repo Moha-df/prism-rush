@@ -58,6 +58,8 @@ pub struct BotView<'a> {
     /// Unopened chests.
     pub chests: &'a [(Vec3, ChestKind)],
     pub downed_allies: &'a [Vec3],
+    /// Power-ups to take and charge shrines to stand in.
+    pub goodies: &'a [Vec3],
 }
 
 pub struct BotOutput {
@@ -120,6 +122,9 @@ pub fn think(brain: &mut BotBrain, view: &BotView) -> BotOutput {
     let enemy = nearest(&mut view.mobs.iter().copied().filter(|p| p.distance(me) < 45.0));
     // Monsters close by take priority over shopping (survive first).
     let threatened = enemy.is_some_and(|e| e.distance(me) < THREAT_DISTANCE);
+    // Power-ups and shrines: worth a detour, even under pressure when close.
+    let goodie = nearest(&mut view.goodies.iter().copied().filter(|p| p.distance(me) < 35.0))
+        .filter(|g| !threatened || g.distance(me) < 10.0);
     let chest = chest.filter(|_| !threatened);
 
     // Give-up timer for the current chest.
@@ -145,6 +150,15 @@ pub fn think(brain: &mut BotBrain, view: &BotView) -> BotOutput {
             buttons_out |= buttons::INTERACT;
         }
         (Some(a), a + Vec3::Y * 0.5)
+    } else if let Some(g) = goodie {
+        // Keep shooting on the way (and while charging a shrine).
+        match enemy {
+            Some(e) => {
+                buttons_out |= buttons::FIRE;
+                (Some(g), e)
+            }
+            None => (Some(g), g + Vec3::Y),
+        }
     } else if let Some(c) = chest {
         if c.distance(me) < 2.0 && toggle {
             buttons_out |= buttons::INTERACT;
@@ -283,14 +297,26 @@ struct WorldSnapshot {
     mobs: Vec<Vec3>,
     chests: Vec<(Vec3, ChestKind)>,
     downed: Vec<Vec3>,
+    goodies: Vec<Vec3>,
 }
+
+type GoodiesQuery<'w, 's> = Query<'w, 's, (Option<&'static Powerup>, Option<&'static Shrine>, Option<&'static ShrineCharge>)>;
 
 fn snapshot(
     mobs: &Query<(&Mob, &MobState)>,
     chests: &Query<(&Chest, &ChestOpen)>,
     players: &Query<(&PlayerState, &Health)>,
+    goodies: &GoodiesQuery,
 ) -> WorldSnapshot {
     WorldSnapshot {
+        goodies: goodies
+            .iter()
+            .filter_map(|(p, s, c)| match (p, s, c) {
+                (Some(p), ..) => Some(p.pos),
+                (_, Some(s), Some(c)) if !c.used => Some(s.pos),
+                _ => None,
+            })
+            .collect(),
         mobs: mobs.iter().map(|(m, s)| s.pos + Vec3::Y * m.kind.def().height * 0.5).collect(),
         chests: chests.iter().filter(|(_, o)| !o.opened).map(|(c, _)| (c.pos, c.kind)).collect(),
         downed: players.iter().filter(|(_, h)| h.downed).map(|(s, _)| s.sim.mv.pos).collect(),
@@ -305,10 +331,11 @@ fn server_bots(
     mobs: Query<(&Mob, &MobState)>,
     chests: Query<(&Chest, &ChestOpen)>,
     players: Query<(&PlayerState, &Health)>,
+    goodies: GoodiesQuery,
     info: Single<&MatchInfo>,
     tick: Res<crate::game::SimTick>,
 ) {
-    let world = snapshot(&mobs, &chests, &players);
+    let world = snapshot(&mobs, &chests, &players, &goodies);
     for (mut brain, state, health, wallet, mut queue) in &mut bots {
         // Server bots see the world in the present: no lag compensation.
         queue.view_tick = tick.0;
@@ -321,6 +348,7 @@ fn server_bots(
             mobs: &world.mobs,
             chests: &world.chests,
             downed_allies: &world.downed,
+            goodies: &world.goodies,
         };
         let out = think(&mut brain, &view);
         let seq = queue.last_received + 1;
@@ -345,13 +373,14 @@ fn bot_client_input(
     mobs: Query<(&Mob, &MobState)>,
     chests: Query<(&Chest, &ChestOpen)>,
     players: Query<(&PlayerState, &Health)>,
+    goodies: GoodiesQuery,
     info: Single<&MatchInfo>,
 ) {
     if !pred.active {
         return;
     }
     let Some((_, health, wallet)) = me.iter().find(|(p, ..)| Some(p.slot) == local.slot) else { return };
-    let world = snapshot(&mobs, &chests, &players);
+    let world = snapshot(&mobs, &chests, &players, &goodies);
     let view = BotView {
         me: &pred.sim,
         downed: health.downed,
@@ -361,6 +390,7 @@ fn bot_client_input(
         mobs: &world.mobs,
         chests: &world.chests,
         downed_allies: &world.downed,
+        goodies: &world.goodies,
     };
     let out = think(&mut brain, &view);
     input.move_axis = out.move_axis;
@@ -470,7 +500,7 @@ mod tests {
     use super::*;
 
     fn view<'a>(me: &'a PlayerSim, mobs: &'a [Vec3], chests: &'a [(Vec3, ChestKind)]) -> BotView<'a> {
-        BotView { me, downed: false, gold: 1000, elapsed: 0.0, chests_opened: 0, mobs, chests, downed_allies: &[] }
+        BotView { me, downed: false, gold: 1000, elapsed: 0.0, chests_opened: 0, mobs, chests, downed_allies: &[], goodies: &[] }
     }
 
     #[test]

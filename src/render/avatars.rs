@@ -51,7 +51,17 @@ impl Plugin for AvatarsPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            (attach_models, detach_player_models, place_chests, update_anim_states, grow_shockwaves, dim_used_statues, hit_pop).chain(),
+            (
+                attach_models,
+                detach_player_models,
+                place_chests,
+                update_anim_states,
+                grow_shockwaves,
+                dim_used_statues,
+                hit_pop,
+                fill_shrines,
+            )
+                .chain(),
         );
     }
 }
@@ -100,6 +110,22 @@ fn hit_pop(
     }
 }
 
+/// The column inside a charge shrine (scaled to the charge).
+#[derive(Component)]
+struct ShrineFill;
+
+fn fill_shrines(shrines: Query<(&ShrineCharge, &Children)>, mut fills: Query<&mut Transform, With<ShrineFill>>) {
+    for (charge, children) in &shrines {
+        for c in children.iter() {
+            if let Ok(mut t) = fills.get_mut(c) {
+                // Full height 2.6 m; a used shrine stays full.
+                let h = if charge.used { 1.0 } else { charge.charge };
+                t.scale.y = (h * 2.6).max(0.01);
+            }
+        }
+    }
+}
+
 /// Awakened statues lose their magic glow (hidden model glow ring).
 fn dim_used_statues(statues: Query<(&StatueUsed, &HasModel), Changed<StatueUsed>>, mut models: Query<&mut Transform, Without<HasModel>>) {
     for (used, has) in &statues {
@@ -140,6 +166,8 @@ fn attach_models(
     statues: Query<(Entity, &Statue), NeedsModel>,
     hazards: Query<(Entity, &Hazard), NeedsModel>,
     gems: Query<(Entity, &XpGem), NeedsModel>,
+    shrines: Query<(Entity, &Shrine), NeedsModel>,
+    powerups: Query<(Entity, &Powerup), NeedsModel>,
 ) {
     let mut attach = |commands: &mut Commands, entity: Entity, part: super::model::Part, stride: f32| {
         let model = spawn_child_model(commands, &mut cache, &mut meshes, &mut materials, entity, &part);
@@ -165,6 +193,12 @@ fn attach_models(
     }
     for (e, g) in &gems {
         attach(&mut commands, e, models::xp_gem(g.value), 1.0);
+    }
+    for (e, p) in &powerups {
+        attach(&mut commands, e, models::powerup(p.kind), 1.0);
+    }
+    for (e, _) in &shrines {
+        attach(&mut commands, e, models::shrine(), 1.0);
     }
     for (e, h) in &hazards {
         let part = match h.kind {
@@ -212,6 +246,14 @@ fn attach_models(
     for (e, p) in &projectiles {
         attach(&mut commands, e, models::projectile(p.kind, p.size), 1.0);
     }
+    // The glowing column that fills up as a shrine charges.
+    for (e, _) in &shrines {
+        let fill = Part::cylinder(0.5, 1.0).at(0.0, 0.5, 0.0).color(palette::GLOW_CYAN).glow(6.0);
+        let holder = commands
+            .spawn((ShrineFill, Transform::from_xyz(0.0, 0.3, 0.0).with_scale(Vec3::new(1.0, 0.01, 1.0)), Visibility::default(), ChildOf(e)))
+            .id();
+        spawn_model(&mut commands, &mut cache, &mut meshes, &mut materials, e, holder, &fill, ());
+    }
 }
 
 /// Back in the lobby, players lose their run components: remove their model.
@@ -232,9 +274,17 @@ fn place_chests(
     statues: Query<(Entity, &Statue), Without<Transform>>,
     hazards: Query<(Entity, &Hazard), Without<Transform>>,
     gems: Query<(Entity, &XpGem), Without<Transform>>,
+    shrines: Query<(Entity, &Shrine), Without<Transform>>,
+    powerups: Query<(Entity, &Powerup), Without<Transform>>,
 ) {
     for (e, g) in &gems {
         commands.entity(e).try_insert((Transform::from_translation(g.pos), Visibility::default()));
+    }
+    for (e, s) in &shrines {
+        commands.entity(e).try_insert((Transform::from_translation(s.pos), Visibility::default()));
+    }
+    for (e, p) in &powerups {
+        commands.entity(e).try_insert((Transform::from_translation(p.pos), Visibility::default()));
     }
     for (e, s) in &statues {
         commands.entity(e).try_insert((Transform::from_translation(s.pos), Visibility::default()));

@@ -29,6 +29,13 @@ pub struct ChestRegistry {
     /// Statues: spawned ones, and those already awakened this run.
     pub statues: HashMap<u64, Entity>,
     pub statues_used: HashSet<u64>,
+    /// Charge shrines (they stay once spawned).
+    pub shrines: HashSet<u64>,
+}
+
+/// Some small chest spots hold a charge shrine instead (deterministic).
+pub fn is_shrine_spot(spot: &crate::shared::worldgen::ChestSpot) -> bool {
+    spot.kind == ChestKind::Small && spot.id % 4 == 1
 }
 
 /// Despawns the entity after a delay (opened chests linger a bit).
@@ -78,6 +85,16 @@ fn stream_chests(
                     registry.statues.insert(st.id, e);
                 }
                 for spot in &chunk.chests {
+                    if is_shrine_spot(spot) {
+                        if registry.shrines.insert(spot.id) {
+                            commands.spawn((
+                                Replicated,
+                                Shrine { spot_id: spot.id, pos: spot.pos },
+                                ShrineCharge::default(),
+                            ));
+                        }
+                        continue;
+                    }
                     if registry.spawned.contains_key(&spot.id) || registry.opened.contains(&spot.id) {
                         continue;
                     }

@@ -520,6 +520,7 @@ fn update_prompt(
     states: Query<(&Player, &PlayerState, &Health)>,
     chests: Query<(&Chest, &ChestOpen)>,
     statues: Query<(&Statue, &StatueUsed)>,
+    shrines: Query<(&Shrine, &ShrineCharge)>,
     pending: Query<(&Player, &Items, Has<PendingChoice>)>,
     info: Query<&MatchInfo>,
     mut prompt: Query<&mut Text, (With<PromptText>, Without<DownedText>)>,
@@ -547,6 +548,9 @@ fn update_prompt(
         {
             text = format!("[E] Maintenir pour réanimer {}", p.name);
             progress = Some(h.revive);
+        } else if let Some((_, charge)) = shrines.iter().find(|(s, c)| !c.used && s.pos.distance(pos) < SHRINE_RADIUS) {
+            text = format!("Sanctuaire de charge : reste dans le cercle ! {:.0}%", charge.charge * 100.0);
+            progress = Some(charge.charge);
         } else if let Some(statue) = statues
             .iter()
             .filter(|(s, u)| !u.0 && s.pos.distance(pos) < crate::game::chests::STATUE_RANGE)
@@ -686,6 +690,8 @@ fn toasts_from_events(
             GameEvent::StatueAwakened { .. } => ("Une statue s'éveille… un boss arrive !".to_string(), crate::render::palette::GLOW_MAGENTA),
             GameEvent::BossKilled => ("Le boss est tombé ! Un coffre légendaire l'attend".to_string(), crate::render::palette::GOLD),
             GameEvent::LevelUp { level } => (format!("Niveau {level} !"), Color::srgb(0.4, 1.0, 0.6)),
+            GameEvent::PowerupTaken { slot, kind, .. } => (format!("{} — {}", name(*slot), kind.name()), crate::render::palette::GOLD),
+            GameEvent::ShrineCharged { .. } => ("Sanctuaire chargé : amélioration gratuite !".to_string(), crate::render::palette::GLOW_CYAN),
             GameEvent::SwarmStarted { black } => (
                 if *black { "Les fantômes NOIRS arrivent…".to_string() } else { "ESSAIM FINAL : les fantômes arrivent !".to_string() },
                 crate::render::palette::GLOW_MAGENTA,

@@ -25,7 +25,7 @@ pub enum ChestKind {
     Large,
     /// Rare glowing chest (also dropped by bosses): epic/legendary only.
     Legendary,
-    /// Steel crate: drops a weapon on the ground.
+    /// Steel crate: offers weapon upgrades (a free level-up).
     Weapon,
 }
 
@@ -44,7 +44,7 @@ impl ChestKind {
             ChestKind::Small => "petit coffre",
             ChestKind::Large => "grand coffre",
             ChestKind::Legendary => "coffre légendaire",
-            ChestKind::Weapon => "caisse d'arme",
+            ChestKind::Weapon => "caisse d'arsenal",
         }
     }
 }

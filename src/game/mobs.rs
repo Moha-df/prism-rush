@@ -172,7 +172,7 @@ fn director(
     if dir.spawn_timer > 0.0 || alive_mobs >= economy::max_alive_time(t, n_players) {
         return;
     }
-    dir.spawn_timer = dir.rng.range(1.0, 2.5);
+    dir.spawn_timer = dir.rng.range(0.5, 1.4);
     let minutes = t / 60.0;
     let options: Vec<MobKind> = MobKind::SPAWNABLE
         .into_iter()
@@ -184,7 +184,8 @@ fn director(
     let weights: Vec<f32> = options.iter().map(|k| k.def().spawn_weight).collect();
     let kind = options[dir.rng.weighted_index(&weights)];
     let cost = kind.def().cost;
-    let pack = dir.rng.range_u32(1, 6).min((dir.credits / cost) as u32).max(1);
+    // Packs: hordes come in groups (Megabonk-like).
+    let pack = dir.rng.range_u32(2, 9).min((dir.credits / cost) as u32).max(1);
     let center = ring_point(&terrain, &mut dir.rng, &alive, 26.0, 42.0);
     for i in 0..pack {
         let offset = Vec3::new(dir.rng.range(-3.0, 3.0), 0.0, dir.rng.range(-3.0, 3.0));

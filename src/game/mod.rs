@@ -12,6 +12,7 @@ pub mod chests;
 pub mod combat;
 pub mod lobby;
 pub mod mobs;
+pub mod pickups;
 pub mod players;
 pub mod progress;
 pub mod world;
@@ -68,6 +69,7 @@ impl Plugin for GamePlugin {
                 mobs::MobsPlugin,
                 chests::ChestsPlugin,
                 progress::ProgressPlugin,
+                pickups::PickupsPlugin,
             ));
     }
 }
