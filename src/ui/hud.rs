@@ -702,9 +702,9 @@ fn toasts_from_events(
 fn wave_banner(
     mut events: MessageReader<GameEvent>,
     time: Res<Time>,
-    mut banner: Query<(&mut WaveBanner, &mut Text, &mut TextColor)>,
+    mut banner: Query<(&mut WaveBanner, &mut Text, &mut TextColor, &mut TextShadow, &mut Visibility)>,
 ) {
-    let Ok((mut b, mut text, mut color)) = banner.single_mut() else { return };
+    let Ok((mut b, mut text, mut color, mut shadow, mut vis)) = banner.single_mut() else { return };
     for ev in events.read() {
         match ev {
             GameEvent::WaveStarted { wave, boss } => {
@@ -721,7 +721,14 @@ fn wave_banner(
         }
     }
     b.0 = (b.0 - time.delta_secs()).max(0.0);
-    color.0.set_alpha(b.0.min(1.0));
+    // The shadow has its own color: fade it too, or it stays behind alone.
+    let alpha = b.0.min(1.0);
+    color.0.set_alpha(alpha);
+    shadow.color = Color::srgba(0.0, 0.0, 0.0, 0.75 * alpha);
+    let want = if b.0 > 0.0 { Visibility::Inherited } else { Visibility::Hidden };
+    if *vis != want {
+        *vis = want;
+    }
 }
 
 /// When only a few monsters are left, show where they are (even through walls).
