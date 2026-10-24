@@ -97,6 +97,12 @@ pub fn chest_price(kind: ChestKind, wave: u32) -> u32 {
     (kind.base_price() * wave_price_mult(wave)).round() as u32
 }
 
+/// Silver earned at the end of a run (spent in the lobby to unlock
+/// weapons): surviving long matters most.
+pub fn silver_reward(duration: f32, kills: u32, team_level: u32) -> u32 {
+    (duration / 12.0) as u32 + kills / 15 + team_level * 3
+}
+
 /// Gold paid to *each* player for a kill.
 pub fn kill_reward(base_gold: f32, difficulty: f32, gold_mult: f32) -> u32 {
     (base_gold * difficulty * gold_mult).round().max(1.0) as u32
@@ -139,13 +145,14 @@ pub fn time_monster_level(elapsed: f32) -> u32 {
 
 /// Spawn budget gained per second.
 pub fn spawn_rate(elapsed: f32, players: u32) -> f32 {
-    (0.3 + 0.22 * players.max(1) as f32) * (1.0 + elapsed / 60.0 * 0.5)
+    // Megabonk-like hordes: automatic weapons need crowds to shine.
+    (0.6 + 0.4 * players.max(1) as f32) * (1.0 + elapsed / 60.0 * 0.6)
 }
 
 /// Max monsters alive at once (performance and network cap).
 pub fn max_alive_time(elapsed: f32, players: u32) -> usize {
-    let n = 8.0 + 4.0 * players.max(1) as f32 + elapsed / 60.0 * 6.0;
-    (n as usize).min(140)
+    let n = 14.0 + 6.0 * players.max(1) as f32 + elapsed / 60.0 * 8.0;
+    (n as usize).min(160)
 }
 
 /// Strength multiplier of the Final Swarm ghosts: +12% per minute, forever.
@@ -240,7 +247,7 @@ mod tests {
         assert!(swarm_mult(30.0 * 60.0) > 5.0);
         assert!(xp_to_next(10) > xp_to_next(2));
         assert!(chest_price_v3(ChestKind::Small, 5, 0.0) > chest_price_v3(ChestKind::Small, 0, 0.0));
-        assert!(max_alive_time(1e6, 4) <= 140);
+        assert!(max_alive_time(1e6, 4) <= 160);
     }
 
     #[test]

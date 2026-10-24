@@ -213,8 +213,8 @@ impl ItemKind {
             Thorns => "Ronces",
             Ankh => "Ankh",
             LuckyCoin => "Pièce fétiche",
-            ExtendedMag => "Chargeur étendu",
-            QuickHands => "Mains agiles",
+            ExtendedMag => "Gros calibre",
+            QuickHands => "Plumes du vent",
             TreasureMap => "Carte au trésor",
             Clover => "Trèfle à 4 feuilles",
             Medkit => "Trousse de soin",
@@ -252,14 +252,14 @@ impl ItemKind {
             Thorns => "Renvoie 40% des dégâts de mêlée subis",
             Ankh => "Te relève seul une fois quand tu tombes (consommé)",
             LuckyCoin => "+15% or gagné",
-            ExtendedMag => "+25% munitions par chargeur",
-            QuickHands => "+20% vitesse de rechargement",
+            ExtendedMag => "+12% taille des projectiles et zones",
+            QuickHands => "+15% vitesse des projectiles",
             TreasureMap => "Coffres -10% moins chers (pour toi)",
             Clover => "Meilleures raretés dans les coffres",
-            Medkit => "Soigne 35% de tes PV à la fin de chaque vague",
+            Medkit => "Soigne 35% de tes PV à chaque niveau d'équipe",
             Crown => "+1 carte au choix dans les coffres",
             DragonHeart => "+60 PV max et +4 PV/s",
-            GatlingSoul => "+35% cadence et +15% munitions",
+            GatlingSoul => "+35% cadence et +1 projectile",
         }
     }
 
@@ -268,11 +268,11 @@ impl ItemKind {
         match self {
             FrogLegs | Jetpack | SwiftBoots | Thruster | DashCoil | SlideWax | FeatherCape | PhaseStep => Category::Mobility,
             PowerRounds | HairTrigger | CritLens | Executioner | UnstableRounds | TeslaCoil | HollowPoint | Berserker
-            | Bloodlust | GatlingSoul => Category::Offense,
+            | Bloodlust | GatlingSoul | ExtendedMag | QuickHands => Category::Offense,
             VitalHeart | RegenMoss | ArmorPlate | VampireFangs | EnergyShield | Thorns | Ankh | DragonHeart => {
                 Category::Defense
             }
-            LuckyCoin | ExtendedMag | QuickHands | TreasureMap | Clover | Medkit | Crown => Category::Utility,
+            LuckyCoin | TreasureMap | Clover | Medkit | Crown => Category::Utility,
         }
     }
 
@@ -391,8 +391,6 @@ pub struct PlayerStats {
     pub shield_max: f32,
     pub damage_mult: f32,
     pub fire_rate_mult: f32,
-    pub reload_speed_mult: f32,
-    pub mag_mult: f32,
     pub crit_chance: f32,
     /// Damage multiplier of a critical hit.
     pub crit_mult: f32,
@@ -450,8 +448,6 @@ impl PlayerStats {
             shield_max: 25.0 * n(EnergyShield),
             damage_mult: (1.0 + 0.12 * n(PowerRounds)) * (1.0 + 0.08 * t(Tome::Damage)),
             fire_rate_mult: (1.0 + 0.10 * n(HairTrigger) + 0.35 * n(GatlingSoul)) * (1.0 + 0.075 * t(Tome::Cooldown)),
-            reload_speed_mult: 1.0 + 0.2 * n(QuickHands),
-            mag_mult: 1.0 + 0.25 * n(ExtendedMag) + 0.15 * n(GatlingSoul),
             // Diminishing returns so it never reaches 100%.
             crit_chance: 1.0 - 0.93f32.powf(n(CritLens)) * (1.0 - 0.07 * t(Tome::Precision)).max(0.0),
             crit_mult: 2.0 + 0.6 * n(Executioner),
@@ -470,10 +466,10 @@ impl PlayerStats {
             cards: 3 + inv.count(Crown) as usize,
             attraction: 1.0 + 0.6 * t(Tome::Attraction),
             xp_mult: 1.0 + 0.1 * t(Tome::Experience),
-            size_mult: 1.0 + 0.1 * t(Tome::Size),
-            proj_speed_mult: 1.0 + 0.15 * t(Tome::ProjectileSpeed),
+            size_mult: (1.0 + 0.1 * t(Tome::Size)) * (1.0 + 0.12 * n(ExtendedMag)),
+            proj_speed_mult: (1.0 + 0.15 * t(Tome::ProjectileSpeed)) * (1.0 + 0.15 * n(QuickHands)),
             duration_mult: 1.0 + 0.15 * t(Tome::Duration),
-            quantity: t(Tome::Quantity).floor() as u32,
+            quantity: t(Tome::Quantity).floor() as u32 + inv.count(GatlingSoul),
         }
     }
 
@@ -509,7 +505,7 @@ mod tests {
     #[test]
     fn every_category_and_rarity_has_items() {
         for cat in [Category::Mobility, Category::Offense, Category::Defense, Category::Utility] {
-            assert!(ItemKind::ALL.iter().filter(|i| i.category() == cat).count() >= 6, "{cat:?}");
+            assert!(ItemKind::ALL.iter().filter(|i| i.category() == cat).count() >= 5, "{cat:?}");
         }
         for r in Rarity::ALL {
             assert!(ItemKind::of_rarity(r).count() >= 4, "{r:?}");

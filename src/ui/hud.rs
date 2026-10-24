@@ -214,7 +214,7 @@ fn spawn_hud(mut commands: Commands) {
 
     // Bottom-right: weapon.
     let br = child(&mut commands, (Node { align_items: AlignItems::FlexEnd, ..abs_node(None, Some(24.0), None, Some(24.0)) },));
-    commands.spawn((label("", 16.0, TEXT_DIM), SlotsText, ChildOf(br)));
+    commands.spawn((label("", 16.0, TEXT), SlotsText, TextLayout::justify(Justify::Right), ChildOf(br)));
     commands.spawn((label("", 22.0, TEXT), WeaponText, ChildOf(br)));
     commands.spawn((Text::new(""), bold(20.0), TextColor(TEXT), TextShadow::default(), AmmoText, ChildOf(br)));
     commands.spawn((bar(200.0, 6.0, ACCENT, ReloadFill), ChildOf(br)));
@@ -890,8 +890,14 @@ fn place_world_labels(
     }
 }
 
-fn toggle_pause(keys: Res<ButtonInput<KeyCode>>, mut paused: ResMut<Paused>, mut menu: Query<&mut Visibility, With<PauseMenu>>) {
-    if keys.just_pressed(KeyCode::Escape) {
+fn toggle_pause(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut paused: ResMut<Paused>,
+    mut menu: Query<&mut Visibility, With<PauseMenu>>,
+    config: Res<crate::config::AppConfig>,
+) {
+    // (Screenshot runs ignore the keyboard: the window may get stray keys.)
+    if keys.just_pressed(KeyCode::Escape) && config.shots.is_none() {
         paused.0 = !paused.0;
     }
     if let Ok(mut vis) = menu.single_mut() {

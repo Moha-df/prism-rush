@@ -394,19 +394,17 @@ pub fn paint_item(item: ItemKind) -> Canvas {
                 .poly(&[(32.0, 18.0), (36.0, 28.0), (46.0, 29.0), (38.0, 36.0), (41.0, 46.0), (32.0, 40.0), (23.0, 46.0), (26.0, 36.0), (18.0, 29.0), (28.0, 28.0)], YELLOW);
         }
         ExtendedMag => {
-            c.poly(&[(20.0, 18.0), (40.0, 18.0), (46.0, 60.0), (26.0, 60.0)], DARK_GREY)
-                .rect(22.0, 6.0, 38.0, 18.0, GOLD)
-                .ellipse((30.0, 6.0), 4.0, 5.0, ORANGE)
-                .rect(24.0, 30.0, 42.0, 34.0, GREY)
-                .rect(25.0, 42.0, 43.0, 46.0, GREY);
+            // A huge bullet.
+            c.rounded(20.0, 24.0, 44.0, 58.0, 3.0, GOLD)
+                .ellipse((32.0, 24.0), 12.0, 18.0, ORANGE)
+                .rect(20.0, 50.0, 44.0, 54.0, BROWN);
         }
         QuickHands => {
-            c.fill(GREEN, |p| {
-                let d = p.distance(Vec2::splat(32.0));
-                let a = (p.y - 32.0).atan2(p.x - 32.0);
-                (17.0..24.0).contains(&d) && !(-0.9..0.1).contains(&a)
-            })
-            .poly(&[(46.0, 16.0), (60.0, 24.0), (46.0, 34.0)], GREEN);
+            // A feather in the wind.
+            c.poly(&[(14.0, 54.0), (24.0, 30.0), (44.0, 10.0), (52.0, 12.0), (40.0, 34.0), (18.0, 56.0)], rgb(0.85, 0.95, 1.0))
+                .line((12.0, 58.0), (46.0, 14.0), 2.0, GREY)
+                .line((40.0, 44.0), (58.0, 44.0), 2.5, CYAN)
+                .line((44.0, 52.0), (60.0, 52.0), 2.5, CYAN);
         }
         TreasureMap => {
             c.poly(&[(8.0, 12.0), (56.0, 8.0), (52.0, 54.0), (12.0, 58.0)], BEIGE)
@@ -459,7 +457,7 @@ pub fn paint_main(kind: MainWeapon) -> Canvas {
             c.line((10.0, 56.0), (44.0, 22.0), 5.0, BROWN).circle((48.0, 16.0), 11.0, ORANGE).circle((48.0, 16.0), 6.0, YELLOW);
         }
         MainWeapon::LightningStaff => {
-            c.line((10.0, 56.0), (42.0, 24.0), 5.0, l).poly(&[(48.0, 4.0), (58.0, 16.0), (48.0, 30.0), (38.0, 16.0)], CYAN).bolt(44.0, 10.0, 0.5, WHITE);
+            c.line((10.0, 56.0), (42.0, 24.0), 5.0, l).poly(&[(48.0, 4.0), (58.0, 16.0), (48.0, 30.0), (38.0, 16.0)], CYAN).bolt(43.0, 8.0, 14.0, WHITE);
         }
         MainWeapon::Bow => {
             c.path(&[(18.0, 6.0), (34.0, 14.0), (42.0, 32.0), (34.0, 50.0), (18.0, 58.0)], 5.0, BROWN)
@@ -498,7 +496,7 @@ pub fn paint_auto(kind: AutoWeapon) -> Canvas {
             c.circle((32.0, 32.0), 26.0, rgb(0.5, 0.2, 0.9)).circle((32.0, 32.0), 19.0, PURPLE).ring((32.0, 32.0), 26.0, 3.0, PINK).circle((32.0, 32.0), 7.0, WHITE);
         }
         AutoWeapon::Lightning => {
-            c.ellipse((32.0, 14.0), 24.0, 10.0, GREY).bolt(20.0, 18.0, 1.4, YELLOW);
+            c.ellipse((32.0, 14.0), 24.0, 10.0, GREY).bolt(18.0, 18.0, 42.0, YELLOW);
         }
         AutoWeapon::Orbs => {
             c.ring((32.0, 32.0), 20.0, 2.0, CYAN).circle((32.0, 12.0), 8.0, CYAN).circle((14.0, 42.0), 8.0, CYAN).circle((50.0, 42.0), 8.0, CYAN).circle((32.0, 32.0), 5.0, WHITE);
@@ -569,7 +567,7 @@ pub fn paint_tome(t: Tome) -> Canvas {
             c.poly(&[(20.0, 18.0), (44.0, 18.0), (44.0, 32.0), (32.0, 48.0), (20.0, 32.0)], GREY);
         }
         Tome::Agility => {
-            c.bolt(22.0, 16.0, 1.0, YELLOW);
+            c.bolt(20.0, 14.0, 34.0, YELLOW);
         }
         Tome::Luck => {
             c.circle((26.0, 28.0), 7.0, GREEN).circle((38.0, 28.0), 7.0, GREEN).circle((32.0, 38.0), 7.0, GREEN).line((32.0, 40.0), (34.0, 50.0), 2.0, DARK_GREEN);

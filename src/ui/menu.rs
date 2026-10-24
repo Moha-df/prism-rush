@@ -79,7 +79,7 @@ fn spawn_menu(mut commands: Commands, config: Res<AppConfig>) {
                 ],
             ),
             label(
-                "ZQSD bouger · Espace sauter · Maj sprint · Ctrl glisser · A dash · E interagir · R recharger · 1-6/molette armes · Échap pause",
+                "ZQSD bouger · Espace sauter · Maj sprint · Ctrl glisser · A dash · Clic gauche (maintenu) tirer · E interagir · 1-4 cartes · Échap pause",
                 15.0,
                 TEXT_DIM
             ),

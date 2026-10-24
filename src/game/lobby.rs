@@ -215,11 +215,19 @@ fn handle_lobby_commands(
     }
 }
 
-/// A player changes their starting weapon in the lobby.
-fn handle_pick_main(mut picks: MessageReader<FromClient<PickMain>>, mut players: Query<(&Owner, &mut Player)>) {
+/// A player changes their starting weapon (or unlocked weapons) in the lobby.
+fn handle_pick_main(
+    mut picks: MessageReader<FromClient<PickLoadout>>,
+    mut players: Query<(&Owner, &mut Player, &mut super::progress::AutoPool)>,
+) {
     for pick in picks.read() {
-        if let Some((_, mut player)) = players.iter_mut().find(|(o, _)| o.client == Some(pick.client_id)) {
-            player.main = pick.message.0;
+        if let Some((_, mut player, mut pool)) = players.iter_mut().find(|(o, ..)| o.client == Some(pick.client_id)) {
+            player.main = pick.message.main;
+            for a in &pick.message.autos {
+                if !pool.0.contains(a) {
+                    pool.0.push(*a);
+                }
+            }
         }
     }
 }

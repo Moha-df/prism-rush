@@ -646,8 +646,8 @@ pub fn muzzle(kind: MainWeapon) -> Vec3 {
 /// A magic staff held forward, with a glowing head.
 fn staff(head: Part, ring: Color) -> Part {
     Part::pivot()
-        .with(Part::cylinder(0.05, 0.85).at(0.0, -0.02, -0.25).rot_x(80.0).color(WOOD_DARK))
-        .with(Part::torus(0.11, 0.025).at(0.0, 0.07, -0.6).rot_x(80.0).color(ring).glow(3.0).tag(AnimTag::Recoil))
+        .with(Part::cylinder(0.05, 0.85).at(0.0, -0.02, -0.25).rot_x(-80.0).color(WOOD_DARK))
+        .with(Part::torus(0.11, 0.025).at(0.0, 0.07, -0.6).rot_x(-80.0).color(ring).glow(3.0).tag(AnimTag::Recoil))
         .with(head.at(0.0, 0.1, -0.72))
 }
 

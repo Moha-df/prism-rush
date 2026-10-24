@@ -322,9 +322,13 @@ pub struct Hello {
     pub autos: Vec<AutoWeapon>,
 }
 
-/// Client -> server, in the lobby: change my starting main weapon.
-#[derive(Message, Clone, Copy, Debug, Serialize, Deserialize)]
-pub struct PickMain(pub MainWeapon);
+/// Client -> server, in the lobby: my starting main weapon and the
+/// automatic weapons I have unlocked (after a purchase).
+#[derive(Message, Clone, Debug, Serialize, Deserialize)]
+pub struct PickLoadout {
+    pub main: MainWeapon,
+    pub autos: Vec<AutoWeapon>,
+}
 
 /// Client -> server: the latest inputs. Sent unreliably every tick; we resend
 /// the last few inputs each time so a lost packet costs nothing.
@@ -451,7 +455,7 @@ pub fn register_protocol(app: &mut App) {
         .add_client_message::<InputBatch>(Channel::Unreliable)
         .add_client_message::<LobbyCommand>(Channel::Ordered)
         .add_client_message::<ChooseCard>(Channel::Ordered)
-        .add_client_message::<PickMain>(Channel::Ordered)
+        .add_client_message::<PickLoadout>(Channel::Ordered)
         .add_server_message::<Welcome>(Channel::Ordered)
         .add_server_message::<Fx>(Channel::Unreliable)
         .add_server_message::<GameEvent>(Channel::Ordered);

@@ -5,11 +5,12 @@ use bevy::prelude::*;
 use super::widgets::*;
 use super::AppState;
 use crate::net::protocol::{player_color, GameEvent, LobbyCommand, RunSummary};
-use crate::net::{NetCommand, NetRole};
+use crate::net::{LocalPlayer, NetCommand, NetRole};
 
-/// Statistics of the last run, received from the server.
+/// Statistics of the last run, received from the server, and the silver
+/// we earned from it.
 #[derive(Resource, Default)]
-pub struct LastRun(pub Option<RunSummary>);
+pub struct LastRun(pub Option<RunSummary>, pub u32);
 
 pub struct GameOverPlugin;
 
@@ -25,10 +26,28 @@ impl Plugin for GameOverPlugin {
 #[derive(Component)]
 struct StatsTable;
 
-fn store_summary(mut events: MessageReader<GameEvent>, mut last: ResMut<LastRun>) {
+fn store_summary(
+    mut events: MessageReader<GameEvent>,
+    mut last: ResMut<LastRun>,
+    local: Res<LocalPlayer>,
+    mut config: ResMut<crate::config::AppConfig>,
+) {
     for ev in events.read() {
         if let GameEvent::GameOver(summary) = ev {
             last.0 = Some((**summary).clone());
+            // Our reward, kept in our own settings file.
+            let silver = summary
+                .players
+                .iter()
+                .find(|p| Some(p.slot) == local.slot)
+                .map(|p| crate::shared::economy::silver_reward(summary.duration, p.kills, summary.level))
+                .unwrap_or(0);
+            last.1 = silver;
+            if silver > 0 {
+                config.silver += silver;
+                config.save();
+                info!("earned {silver} silver (total {})", config.silver);
+            }
         }
     }
 }
@@ -66,9 +85,15 @@ fn fill_when_ready(
     let Some(run) = &last.0 else { return };
     let secs = run.duration as u32;
     commands.spawn((
-        label(format!("Survécu {:02}:{:02} — vague {} atteinte", secs / 60, secs % 60, run.level), 26.0, TEXT),
+        label(format!("Survécu {:02}:{:02} — niveau d'équipe {}", secs / 60, secs % 60, run.level), 26.0, TEXT),
         ChildOf(table),
     ));
+    if last.1 > 0 {
+        commands.spawn((
+            label(format!("+{} argent (à dépenser dans le salon pour débloquer des armes)", last.1), 20.0, Color::srgb(0.8, 0.85, 0.95)),
+            ChildOf(table),
+        ));
+    }
     commands.spawn((
         label("Joueur            Kills   Dégâts   Or gagné   Coffres   Réanimations   À terre   Objets", 16.0, TEXT_DIM),
         ChildOf(table),

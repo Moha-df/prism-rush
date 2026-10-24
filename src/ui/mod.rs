@@ -4,6 +4,7 @@
 //! role and the replicated match phase. The server decides when a run starts
 //! or ends; every client simply follows.
 
+pub mod arsenal;
 pub mod cards;
 pub mod gameover;
 pub mod hud;
@@ -42,6 +43,7 @@ impl Plugin for UiPlugin {
                 cards::CardsPlugin,
                 menu::MenuPlugin,
                 lobby::LobbyUiPlugin,
+                arsenal::ArsenalPlugin,
                 hud::HudPlugin,
                 gameover::GameOverPlugin,
             ));

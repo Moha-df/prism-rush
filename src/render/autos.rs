@@ -4,6 +4,7 @@
 
 use std::collections::HashSet;
 
+use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 
 use super::model::{spawn_model, Part, PrimCache};
@@ -16,7 +17,11 @@ use crate::shared::build::{auto_params, AutoWeapon};
 use crate::shared::items::PlayerStats;
 use crate::shared::movement::TICK_HZ;
 
-/// A visual following a player. `index` is the orb number (0 for the aura).
+/// Number of glowing dots drawing the edge of an aura.
+const AURA_DOTS: u32 = 28;
+
+/// A visual following a player. `index` is the orb number, or for the aura:
+/// 0 = the translucent disc, 1.. = the dots on its edge.
 #[derive(Component, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct AutoVisual {
     owner: Entity,
@@ -44,6 +49,7 @@ fn update_auto_visuals(
     mut cache: ResMut<PrimCache>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut aura_assets: Local<Option<(Handle<Mesh>, Handle<StandardMaterial>)>>,
 ) {
     let t = (clock.estimate / TICK_HZ) as f32;
     // What should exist this frame, with its transform.
@@ -60,12 +66,18 @@ fn update_auto_visuals(
             let p = auto_params(*weapon, up, &stats);
             match weapon {
                 AutoWeapon::Aura => {
-                    // The ring breathes a little.
-                    let r = p.size * (1.0 + 0.04 * (time.elapsed_secs() * 4.0).sin());
+                    // The disc breathes a little; dots slowly turn on its edge.
+                    let time = time.elapsed_secs();
+                    let r = p.size * (1.0 + 0.04 * (time * 4.0).sin());
                     wanted.push((
                         AutoVisual { owner: entity, weapon: *weapon, index: 0 },
-                        Transform::from_translation(pos + Vec3::Y * 0.12).with_scale(Vec3::new(r, 1.0, r)),
+                        Transform::from_translation(pos + Vec3::Y * 0.1).with_scale(Vec3::new(r, 1.0, r)),
                     ));
+                    for i in 0..AURA_DOTS {
+                        let a = time * 0.8 + i as f32 / AURA_DOTS as f32 * std::f32::consts::TAU;
+                        let at = pos + Vec3::new(a.cos() * r, 0.15, a.sin() * r);
+                        wanted.push((AutoVisual { owner: entity, weapon: *weapon, index: i + 1 }, Transform::from_translation(at)));
+                    }
                 }
                 AutoWeapon::Orbs => {
                     for i in 0..p.count {
@@ -92,11 +104,24 @@ fn update_auto_visuals(
         if present.contains(&v) {
             continue;
         }
+        if v.weapon == AutoWeapon::Aura && v.index == 0 {
+            // Translucent unit disc (radius 1), scaled to the aura radius.
+            let disc = aura_assets.get_or_insert_with(|| {
+                (
+                    meshes.add(Cylinder::new(1.0, 0.03)),
+                    materials.add(StandardMaterial {
+                        base_color: Color::srgba(1.0, 0.3, 0.8, 0.07),
+                        alpha_mode: AlphaMode::Blend,
+                        unlit: true,
+                        ..default()
+                    }),
+                )
+            });
+            commands.spawn((v, tr, Visibility::default(), Mesh3d(disc.0.clone()), MeshMaterial3d(disc.1.clone()), NotShadowCaster));
+            continue;
+        }
         let part = match v.weapon {
-            // Unit ring (radius 1), scaled to the aura radius.
-            AutoWeapon::Aura => Part::pivot()
-                .with(Part::torus(2.0, 0.07).color(palette::GLOW_MAGENTA).glow(4.0))
-                .with(Part::torus(1.4, 0.03).color(palette::GLOW_MAGENTA).glow(2.0)),
+            AutoWeapon::Aura => Part::pivot().with(Part::sphere(0.14).color(palette::GLOW_MAGENTA).glow(6.0)),
             _ => Part::pivot()
                 .with(Part::ico(ORB_RADIUS * 2.0, ORB_RADIUS * 2.0, ORB_RADIUS * 2.0).color(palette::GLOW_CYAN).glow(5.0))
                 .with(Part::torus(ORB_RADIUS * 2.6, 0.05).rot_x(70.0).color(palette::CRYSTAL_CYAN).glow(3.0)),

@@ -93,7 +93,11 @@ fn show_cards(
     let me = players.iter().find(|(p, ..)| Some(p.slot) == local.slot);
     let pending = me.and_then(|(_, c, _)| c);
     // Main weapon upgrades show the icon of our main weapon.
-    let main_icon = me.and_then(|(.., g)| g).and_then(|g| icons.mains.get(&g.0.main)).cloned().unwrap_or_default();
+    let main = me.and_then(|(.., g)| g).map(|g| g.0.main);
+    let main_icon = (
+        main.and_then(|m| icons.mains.get(&m)).cloned().unwrap_or_default(),
+        main.map(|m| m.def().name).unwrap_or("Arme principale"),
+    );
     let current = overlay.single().ok();
     match (pending, current) {
         (None, Some((e, _))) => {
@@ -112,7 +116,7 @@ fn show_cards(
     }
 }
 
-fn spawn_overlay(commands: &mut Commands, choice: &PendingChoice, icons: &Icons, main_icon: &Handle<Image>) {
+fn spawn_overlay(commands: &mut Commands, choice: &PendingChoice, icons: &Icons, main_icon: &(Handle<Image>, &str)) {
     let root = commands
         .spawn((
             DespawnOnExit(AppState::InGame),
@@ -147,7 +151,8 @@ fn spawn_overlay(commands: &mut Commands, choice: &PendingChoice, icons: &Icons,
     for (i, option) in choice.options.iter().enumerate() {
         let mut look = card_look(option, icons);
         if matches!(option, CardOption::Offer(c) if matches!(c.offer, Offer::UpgradeMain { .. })) {
-            look.icon = main_icon.clone();
+            look.icon = main_icon.0.clone();
+            look.title = main_icon.1.to_string();
         }
         let rarity = look.rarity;
         let card = commands

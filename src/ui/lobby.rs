@@ -37,6 +37,11 @@ fn spawn_lobby(mut commands: Commands, role: Res<NetRole>) {
         ChildOf(p),
     ));
     commands.spawn((
+        super::arsenal::ArsenalPanel,
+        Node { flex_direction: FlexDirection::Column, align_items: AlignItems::Center, row_gap: Val::Px(6.0), margin: UiRect::top(Val::Px(10.0)), ..default() },
+        ChildOf(p),
+    ));
+    commands.spawn((
         label("", 18.0, TEXT),
         OnlineText,
         Node { margin: UiRect::vertical(Val::Px(12.0)), max_width: Val::Px(620.0), ..default() },
