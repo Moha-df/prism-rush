@@ -100,8 +100,8 @@ fn mood_at(wave: f32) -> Mood {
     let x = ((wave - 1.0).max(0.0) / WAVES_PER_MOOD) % MOODS.len() as f32;
     let i = x.floor() as usize;
     let t = x.fract();
-    // Hold each mood, then blend during the last quarter.
-    let t = ((t - 0.75) / 0.25).clamp(0.0, 1.0);
+    // Hold each mood for half of its waves, then blend slowly into the next.
+    let t = ((t - 0.5) / 0.5).clamp(0.0, 1.0);
     let t = t * t * (3.0 - 2.0 * t);
     blend(&MOODS[i], &MOODS[(i + 1) % MOODS.len()], t)
 }
