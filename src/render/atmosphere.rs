@@ -3,6 +3,7 @@
 //! Every 4 waves the time of day moves on: golden afternoon -> sunset ->
 //! violet dusk -> night (glowing monsters look great in the dark) -> back
 //! to afternoon. Values are blended smoothly so a change is never abrupt.
+//! Each map has its own 4 moods (hot haze in the desert, green fog in the swamp).
 //! Also: a layer of low-poly clouds drifting around the camera.
 
 use bevy::light::NotShadowCaster;
@@ -13,6 +14,7 @@ use super::palette;
 use super::{MainCamera, SkyDome};
 use crate::net::protocol::MatchInfo;
 use crate::shared::rng::Rng;
+use crate::shared::rules::MapKind;
 
 /// One lighting mood.
 #[derive(Clone, Copy, Debug)]
@@ -76,6 +78,102 @@ const MOODS: [Mood; 4] = [
     },
 ];
 
+/// Desert of embers: hot haze -> blood-red sunset -> ember dusk -> red night.
+const MOODS_EMBERS: [Mood; 4] = [
+    Mood {
+        sun: [1.0, 0.82, 0.58],
+        sun_lux: 10_000.0,
+        sun_dir: Vec3::new(-0.5, -0.6, -0.6),
+        fog: [0.95, 0.72, 0.52],
+        ambient: [0.75, 0.58, 0.62],
+        ambient_brightness: 1_000.0,
+        sky: [1.2, 0.92, 0.72],
+        clouds: [1.0, 0.85, 0.7],
+    },
+    Mood {
+        sun: [1.0, 0.45, 0.22],
+        sun_lux: 7_000.0,
+        sun_dir: Vec3::new(-0.75, -0.2, -0.65),
+        fog: [0.88, 0.40, 0.26],
+        ambient: [0.72, 0.42, 0.55],
+        ambient_brightness: 900.0,
+        sky: [1.15, 0.52, 0.36],
+        clouds: [1.0, 0.5, 0.35],
+    },
+    Mood {
+        sun: [1.0, 0.38, 0.18],
+        sun_lux: 3_800.0,
+        sun_dir: Vec3::new(-0.8, -0.12, -0.6),
+        fog: [0.42, 0.17, 0.14],
+        ambient: [0.68, 0.38, 0.55],
+        ambient_brightness: 850.0,
+        sky: [0.55, 0.22, 0.2],
+        clouds: [0.55, 0.25, 0.22],
+    },
+    Mood {
+        sun: [0.95, 0.55, 0.45],
+        sun_lux: 2_400.0,
+        sun_dir: Vec3::new(-0.3, -0.8, -0.5),
+        fog: [0.13, 0.06, 0.07],
+        ambient: [0.62, 0.38, 0.5],
+        ambient_brightness: 750.0,
+        sky: [0.2, 0.08, 0.1],
+        clouds: [0.3, 0.15, 0.15],
+    },
+];
+
+/// Cursed swamp: pale mist -> sickly green -> violet gloom -> black night.
+const MOODS_SWAMP: [Mood; 4] = [
+    Mood {
+        sun: [0.8, 0.95, 0.8],
+        sun_lux: 5_000.0,
+        sun_dir: Vec3::new(-0.4, -0.7, -0.6),
+        fog: [0.40, 0.50, 0.44],
+        ambient: [0.45, 0.62, 0.6],
+        ambient_brightness: 900.0,
+        sky: [0.38, 0.68, 0.62],
+        clouds: [0.55, 0.68, 0.62],
+    },
+    Mood {
+        sun: [0.75, 1.0, 0.55],
+        sun_lux: 4_800.0,
+        sun_dir: Vec3::new(-0.7, -0.3, -0.6),
+        fog: [0.28, 0.38, 0.25],
+        ambient: [0.48, 0.62, 0.5],
+        ambient_brightness: 850.0,
+        sky: [0.32, 0.58, 0.34],
+        clouds: [0.5, 0.62, 0.42],
+    },
+    Mood {
+        sun: [0.7, 0.5, 0.95],
+        sun_lux: 3_200.0,
+        sun_dir: Vec3::new(-0.8, -0.15, -0.6),
+        fog: [0.22, 0.16, 0.30],
+        ambient: [0.5, 0.45, 0.85],
+        ambient_brightness: 850.0,
+        sky: [0.32, 0.22, 0.42],
+        clouds: [0.4, 0.3, 0.5],
+    },
+    Mood {
+        sun: [0.55, 0.85, 0.75],
+        sun_lux: 2_200.0,
+        sun_dir: Vec3::new(-0.3, -0.8, -0.5),
+        fog: [0.05, 0.09, 0.09],
+        ambient: [0.4, 0.6, 0.7],
+        ambient_brightness: 750.0,
+        sky: [0.07, 0.13, 0.13],
+        clouds: [0.15, 0.22, 0.22],
+    },
+];
+
+fn moods(map: MapKind) -> &'static [Mood; 4] {
+    match map {
+        MapKind::Meadow => &MOODS,
+        MapKind::Embers => &MOODS_EMBERS,
+        MapKind::Swamp => &MOODS_SWAMP,
+    }
+}
+
 const WAVES_PER_MOOD: f32 = 4.0;
 
 fn mix3(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
@@ -95,15 +193,16 @@ fn blend(a: &Mood, b: &Mood, t: f32) -> Mood {
     }
 }
 
-/// Mood for a (fractional) wave number.
-fn mood_at(wave: f32) -> Mood {
-    let x = ((wave - 1.0).max(0.0) / WAVES_PER_MOOD) % MOODS.len() as f32;
+/// Mood for a (fractional) wave number on a map.
+fn mood_at(wave: f32, map: MapKind) -> Mood {
+    let moods = moods(map);
+    let x = ((wave - 1.0).max(0.0) / WAVES_PER_MOOD) % moods.len() as f32;
     let i = x.floor() as usize;
     let t = x.fract();
     // Hold each mood for half of its waves, then blend slowly into the next.
     let t = ((t - 0.5) / 0.5).clamp(0.0, 1.0);
     let t = t * t * (3.0 - 2.0 * t);
-    blend(&MOODS[i], &MOODS[(i + 1) % MOODS.len()], t)
+    blend(&moods[i], &moods[(i + 1) % moods.len()], t)
 }
 
 #[derive(Resource)]
@@ -198,10 +297,11 @@ fn update_atmosphere(
     // One "wave" of mood per minute: afternoon, sunset ~4 min, dusk ~8 min,
     // night ~12 min (just before the Final Swarm), then around again.
     let target = info.single().map(|m| 1.0 + m.elapsed / 60.0).unwrap_or(1.0);
+    let map = info.single().map(|m| m.rules.map).unwrap_or_default();
     // Glide toward the target wave: the mood changes over a few seconds.
     let k = 1.0 - (-time.delta_secs() * 0.4).exp();
     state.wave += (target - state.wave) * k;
-    let mood = mood_at(state.wave);
+    let mood = mood_at(state.wave, map);
 
     let c3 = |c: [f32; 3]| Color::srgb(c[0], c[1], c[2]);
     if let Ok((mut light, mut t)) = sun.single_mut() {
@@ -214,6 +314,12 @@ fn update_atmosphere(
     }
     for mut f in &mut fog {
         f.color = c3(mood.fog);
+        // The swamp hides its horrors in a thick mist.
+        f.falloff = if map == MapKind::Swamp {
+            FogFalloff::Linear { start: 25.0, end: 100.0 }
+        } else {
+            FogFalloff::Linear { start: 60.0, end: 135.0 }
+        };
     }
     ambient.color = c3(mood.ambient);
     ambient.brightness = mood.ambient_brightness;
@@ -238,16 +344,16 @@ mod tests {
 
     #[test]
     fn moods_cycle_and_blend_smoothly() {
-        let a = mood_at(1.0);
+        let a = mood_at(1.0, MapKind::Meadow);
         assert_eq!(a.sun_lux, MOODS[0].sun_lux);
         // Night around wave 13-16.
-        assert_eq!(mood_at(13.0).sun_lux, MOODS[3].sun_lux);
+        assert_eq!(mood_at(13.0, MapKind::Meadow).sun_lux, MOODS[3].sun_lux);
         // Back to afternoon after a full cycle.
-        assert!((mood_at(17.0).sun_lux - MOODS[0].sun_lux).abs() < 1.0);
+        assert!((mood_at(17.0, MapKind::Meadow).sun_lux - MOODS[0].sun_lux).abs() < 1.0);
         // No jump between two close waves.
         for i in 0..200 {
             let w = 1.0 + i as f32 * 0.1;
-            let d = (mood_at(w).sun_lux - mood_at(w + 0.1).sun_lux).abs();
+            let d = (mood_at(w, MapKind::Meadow).sun_lux - mood_at(w + 0.1, MapKind::Meadow).sun_lux).abs();
             assert!(d < 900.0, "jump at wave {w}: {d}");
         }
     }

@@ -93,6 +93,7 @@ impl Plugin for HudPlugin {
                     update_team_and_boss,
                     update_feedback,
                     toasts_from_events,
+                    unlock_next_map,
                     age_toasts,
                     spawn_world_labels,
                     place_world_labels,
@@ -376,17 +377,28 @@ fn update_vitals(
                 let left = (economy::FINAL_SWARM_TIME - m.elapsed) as u32;
                 format!("Essaim final dans {:02}:{:02}", left / 60, left % 60)
             }
-            1 => "ESSAIM FINAL — fantômes blancs".to_string(),
+            1 => {
+                let left = (economy::BLACK_GHOSTS_TIME - m.elapsed).max(0.0) as u32;
+                format!("ESSAIM FINAL — fantômes blancs (noirs dans {:02}:{:02})", left / 60, left % 60)
+            }
             _ => "ESSAIM FINAL — fantômes noirs".to_string(),
         };
+        let totems = if m.rules.totems > 0 {
+            format!("   ·   Totems ×{} (chance +{:.0}%)", m.rules.totems, m.rules.luck_bonus() * 35.0)
+        } else {
+            String::new()
+        };
         set_text(&mut t, format!(
-            "{:02}:{:02}   ·   Niveau {}   ·   Monstres niv. {}   ·   {} en vie\n{}",
+            "{:02}:{:02}   ·   Niveau {}   ·   Monstres niv. {}   ·   {} en vie\n{}\n{} — {}{}",
             secs / 60,
             secs % 60,
             m.team_level,
             m.level,
             m.enemies_left,
-            swarm
+            swarm,
+            m.rules.map.name(),
+            m.rules.difficulty.name(),
+            totems
         ));
     }
 }
@@ -521,6 +533,7 @@ fn update_prompt(
     chests: Query<(&Chest, &ChestOpen)>,
     statues: Query<(&Statue, &StatueUsed)>,
     shrines: Query<(&Shrine, &ShrineCharge)>,
+    totems: Query<(&Totem, &TotemUsed)>,
     pending: Query<(&Player, &Items, Has<PendingChoice>)>,
     info: Query<&MatchInfo>,
     mut prompt: Query<&mut Text, (With<PromptText>, Without<DownedText>)>,
@@ -551,6 +564,14 @@ fn update_prompt(
         } else if let Some((_, charge)) = shrines.iter().find(|(s, c)| !c.used && s.pos.distance(pos) < SHRINE_RADIUS) {
             text = format!("Sanctuaire de charge : reste dans le cercle ! {:.0}%", charge.charge * 100.0);
             progress = Some(charge.charge);
+        } else if totems.iter().any(|(t, u)| !u.0 && t.pos.distance(pos) < TOTEM_RANGE) {
+            let n = info.single().map(|m| m.rules.totems).unwrap_or(0);
+            text = format!(
+                "[E] Activer le totem — monstres +{:.0}% PV et plus nombreux, mais chance +{:.0}% et récompenses +{:.0}% (actifs : {n})",
+                crate::shared::rules::TOTEM_HP * 100.0,
+                crate::shared::rules::TOTEM_LUCK * 35.0,
+                crate::shared::rules::TOTEM_REWARDS * 100.0
+            );
         } else if let Some(statue) = statues
             .iter()
             .filter(|(s, u)| !u.0 && s.pos.distance(pos) < crate::game::chests::STATUE_RANGE)
@@ -660,6 +681,36 @@ fn update_feedback(
     }
 }
 
+/// Surviving until the Final Swarm (15:00) unlocks the next map, in our own
+/// settings file (like silver, unlocks belong to each player).
+fn unlock_next_map(
+    mut commands: Commands,
+    info: Query<&MatchInfo>,
+    mut config: ResMut<AppConfig>,
+    list: Query<Entity, With<ToastList>>,
+) {
+    let Ok(m) = info.single() else { return };
+    if m.phase != Phase::Playing || m.elapsed < economy::FINAL_SWARM_TIME {
+        return;
+    }
+    let Some(next) = m.rules.map.next() else { return };
+    if config.is_unlocked_map(next) {
+        return;
+    }
+    config.maps_unlocked = next.index() + 1;
+    config.save();
+    info!("map unlocked: {}", next.name());
+    if let Ok(list) = list.single() {
+        commands.spawn((
+            Toast(9.0),
+            Node { padding: UiRect::axes(Val::Px(10.0), Val::Px(4.0)), border_radius: BorderRadius::all(Val::Px(6.0)), ..default() },
+            BackgroundColor(Color::srgba(0.05, 0.03, 0.08, 0.7)),
+            ChildOf(list),
+            children![label(format!("Nouvelle carte débloquée : {} !", next.name()), 22.0, crate::render::palette::GOLD)],
+        ));
+    }
+}
+
 fn toasts_from_events(
     mut commands: Commands,
     mut events: MessageReader<GameEvent>,
@@ -693,8 +744,16 @@ fn toasts_from_events(
             GameEvent::PowerupTaken { slot, kind, .. } => (format!("{} — {}", name(*slot), kind.name()), crate::render::palette::GOLD),
             GameEvent::ShrineCharged { .. } => ("Sanctuaire chargé : amélioration gratuite !".to_string(), crate::render::palette::GLOW_CYAN),
             GameEvent::SwarmStarted { black } => (
-                if *black { "Les fantômes NOIRS arrivent…".to_string() } else { "ESSAIM FINAL : les fantômes arrivent !".to_string() },
+                if *black {
+                    "20:00 — Plus que des fantômes NOIRS, de plus en plus rapides… Bravo d'être encore là !".to_string()
+                } else {
+                    "15:00 — ESSAIM FINAL : les fantômes blancs arrivent. Survis !".to_string()
+                },
                 crate::render::palette::GLOW_MAGENTA,
+            ),
+            GameEvent::TotemActivated { slot, totems, .. } => (
+                format!("{} active un totem : les monstres se renforcent, la chance aussi ! (×{totems})", name(*slot)),
+                Color::srgb(1.0, 0.3, 0.3),
             ),
             GameEvent::NewMonster { kind } => (
                 format!("Nouveau : {} — {}", kind.def().name, kind.hint()),

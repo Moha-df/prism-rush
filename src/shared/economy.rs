@@ -98,9 +98,10 @@ pub fn chest_price(kind: ChestKind, wave: u32) -> u32 {
 }
 
 /// Silver earned at the end of a run (spent in the lobby to unlock
-/// weapons): surviving long matters most.
-pub fn silver_reward(duration: f32, kills: u32, team_level: u32) -> u32 {
-    (duration / 12.0) as u32 + kills / 15 + team_level * 3
+/// weapons): surviving long matters most. `mult` comes from the difficulty
+/// and the map (see `rules.rs`).
+pub fn silver_reward(duration: f32, kills: u32, team_level: u32, mult: f32) -> u32 {
+    (((duration / 12.0) as u32 + kills / 15 + team_level * 3) as f32 * mult).round() as u32
 }
 
 /// Gold paid to *each* player for a kill.
@@ -124,9 +125,11 @@ pub fn spawn_interval(wave: u32) -> f32 {
 // it is impossible.
 // ---------------------------------------------------------------------------
 
-/// The Final Swarm starts: white ghosts join the fight.
+/// The Final Swarm starts: white ghosts join the fight. Surviving until
+/// then unlocks the next map. From here on the run is meant to kill you.
 pub const FINAL_SWARM_TIME: f32 = 15.0 * 60.0;
-/// Black ghosts (faster, tougher) join too.
+/// Only black ghosts spawn from now on (for broken builds only), faster
+/// and stronger every minute.
 pub const BLACK_GHOSTS_TIME: f32 = 20.0 * 60.0;
 /// Bosses arrive at these times (seconds).
 pub const BOSS_TIMES: [f32; 3] = [4.0 * 60.0, 8.0 * 60.0, 12.0 * 60.0];
@@ -149,25 +152,45 @@ pub fn spawn_rate(elapsed: f32, players: u32) -> f32 {
     (0.6 + 0.4 * players.max(1) as f32) * (1.0 + elapsed / 60.0 * 0.6)
 }
 
-/// Max monsters alive at once (performance and network cap).
+/// Max regular monsters alive at once (performance and network cap). During
+/// the Final Swarm it shrinks a little to leave room for the ghosts.
 pub fn max_alive_time(elapsed: f32, players: u32) -> usize {
     let n = 14.0 + 6.0 * players.max(1) as f32 + elapsed / 60.0 * 8.0;
-    (n as usize).min(160)
+    let cap = if elapsed >= FINAL_SWARM_TIME { 110 } else { 160 };
+    (n as usize).min(cap)
 }
 
-/// Strength multiplier of the Final Swarm ghosts: +12% per minute, forever.
+/// Max monsters (ghosts included) alive at once.
+pub const MAX_MOBS: usize = 190;
+
+/// Strength multiplier of the Final Swarm ghosts: +20% per minute after
+/// 15:00, and another +15% per minute after 20:00, forever.
 /// (Exponential: after a while nothing can survive. That is the point.)
 pub fn swarm_mult(elapsed: f32) -> f32 {
-    let minutes = ((elapsed - FINAL_SWARM_TIME) / 60.0).max(0.0);
-    1.12f32.powf(minutes)
+    let white = ((elapsed - FINAL_SWARM_TIME) / 60.0).max(0.0);
+    let black = ((elapsed - BLACK_GHOSTS_TIME) / 60.0).max(0.0);
+    1.2f32.powf(white) * 1.15f32.powf(black)
 }
 
-/// Ghosts spawned per second during the Final Swarm.
+/// Ghosts spawned per second during the Final Swarm. White ghosts arrive
+/// faster every minute (a wall of them by 19:00); black ghosts start as a
+/// steady flood and keep growing.
 pub fn ghost_rate(elapsed: f32, players: u32) -> f32 {
+    let p = players.max(1) as f32;
     if elapsed < FINAL_SWARM_TIME {
-        return 0.0;
+        0.0
+    } else if elapsed < BLACK_GHOSTS_TIME {
+        let minutes = (elapsed - FINAL_SWARM_TIME) / 60.0;
+        (1.2 + 0.5 * p) * (1.0 + 0.5 * minutes)
+    } else {
+        let minutes = (elapsed - BLACK_GHOSTS_TIME) / 60.0;
+        (2.0 + 0.7 * p) * (1.0 + 0.4 * minutes)
     }
-    (1.0 + 0.4 * players.max(1) as f32) * swarm_mult(elapsed).sqrt()
+}
+
+/// Regular monsters stop coming once only black ghosts spawn.
+pub fn regular_spawns(elapsed: f32) -> bool {
+    elapsed < BLACK_GHOSTS_TIME
 }
 
 /// XP needed to go from `level` to `level + 1` (team level).
@@ -243,11 +266,16 @@ mod tests {
         assert_eq!(swarm_mult(0.0), 1.0);
         assert_eq!(ghost_rate(FINAL_SWARM_TIME - 1.0, 2), 0.0);
         assert!(ghost_rate(FINAL_SWARM_TIME + 600.0, 2) > ghost_rate(FINAL_SWARM_TIME + 60.0, 2));
-        // 30 minutes in, ghosts are several times stronger: near impossible.
-        assert!(swarm_mult(30.0 * 60.0) > 5.0);
+        // 30 minutes in, ghosts are many times stronger: impossible.
+        assert!(swarm_mult(30.0 * 60.0) > 20.0);
+        // Ghost floods grow, and black ghosts come in force at 20:00.
+        assert!(ghost_rate(BLACK_GHOSTS_TIME - 1.0, 1) > 2.0 * ghost_rate(FINAL_SWARM_TIME, 1));
+        assert!(regular_spawns(BLACK_GHOSTS_TIME - 1.0));
+        assert!(!regular_spawns(BLACK_GHOSTS_TIME));
         assert!(xp_to_next(10) > xp_to_next(2));
         assert!(chest_price_v3(ChestKind::Small, 5, 0.0) > chest_price_v3(ChestKind::Small, 0, 0.0));
         assert!(max_alive_time(1e6, 4) <= 160);
+        assert!(silver_reward(600.0, 100, 10, 2.0) > silver_reward(600.0, 100, 10, 1.0));
     }
 
     #[test]

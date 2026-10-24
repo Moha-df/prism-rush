@@ -917,16 +917,17 @@ pub fn ray_sphere(origin: Vec3, dir: Vec3, center: Vec3, r: f32) -> Option<f32> 
     if t >= 0.0 { Some(t) } else if c <= 0.0 { Some(0.0) } else { None }
 }
 
-/// The monsters of a run: for every role, a few of its monsters (at least
-/// one that can appear in the first minutes, so the run starts right away).
-pub fn roll_roster(rng: &mut Rng) -> Vec<MobKind> {
+/// The monsters of a run: for every role, a few of the map's monsters (at
+/// least one that can appear in the first minutes, so the run starts right away).
+pub fn roll_roster(rng: &mut Rng, pool: &[MobKind]) -> Vec<MobKind> {
     let mut roster = Vec::new();
     for role in [Role::Swarmer, Role::Blob, Role::Ranged, Role::Bomber, Role::Tank, Role::Support, Role::Charger] {
-        let mut members: Vec<MobKind> = MobKind::SPAWNABLE.into_iter().filter(|k| k.role() == role).collect();
+        let mut members: Vec<MobKind> = pool.iter().copied().filter(|k| k.role() == role).collect();
         rng.shuffle(&mut members);
         let mut picked: Vec<MobKind> = members.iter().copied().take(role.roster_size()).collect();
         let early = |k: &MobKind| k.def().unlock_minute <= 1.0;
         if matches!(role, Role::Swarmer | Role::Blob | Role::Ranged)
+            && !picked.is_empty()
             && !picked.iter().any(early)
             && let Some(e) = members.iter().copied().find(early)
         {
@@ -938,8 +939,8 @@ pub fn roll_roster(rng: &mut Rng) -> Vec<MobKind> {
 }
 
 /// The bosses of a run, in order (all different until each one came once).
-pub fn roll_bosses(rng: &mut Rng) -> Vec<MobKind> {
-    let mut bosses = MobKind::BOSSES.to_vec();
+pub fn roll_bosses(rng: &mut Rng, pool: &[MobKind]) -> Vec<MobKind> {
+    let mut bosses = pool.to_vec();
     rng.shuffle(&mut bosses);
     bosses
 }
@@ -974,9 +975,11 @@ mod tests {
     #[test]
     fn rosters_vary_and_always_have_early_monsters() {
         let mut seen = std::collections::HashSet::new();
-        for seed in 0..40 {
-            let roster = roll_roster(&mut Rng::new(seed));
-            assert_eq!(roster.len(), 13);
+        for seed in 0..120 {
+            let map = crate::shared::rules::MapKind::ALL[seed as usize % 3];
+            let roster = roll_roster(&mut Rng::new(seed), map.monsters());
+            assert!(roster.len() >= 11, "{map:?}: {roster:?}");
+            assert!(roster.iter().all(|k| map.monsters().contains(k)));
             for role in [Role::Swarmer, Role::Blob, Role::Ranged] {
                 assert!(roster.iter().any(|k| k.role() == role && k.def().unlock_minute <= 1.0), "{role:?}");
             }
@@ -989,10 +992,10 @@ mod tests {
 
     #[test]
     fn bosses_are_shuffled() {
-        let a = roll_bosses(&mut Rng::new(1));
-        let b = roll_bosses(&mut Rng::new(2));
+        let a = roll_bosses(&mut Rng::new(1), &MobKind::BOSSES);
+        let b = roll_bosses(&mut Rng::new(2), &MobKind::BOSSES);
         assert_eq!(a.len(), 6);
-        assert!(a != b || roll_bosses(&mut Rng::new(3)) != a);
+        assert!(a != b || roll_bosses(&mut Rng::new(3), &MobKind::BOSSES) != a);
     }
 
     #[test]

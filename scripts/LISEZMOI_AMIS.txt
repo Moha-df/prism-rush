@@ -27,3 +27,8 @@ nouvelles armes.
 
 Ce qui brille (orange, rose, cyan) sur un gros monstre est un point faible :
 degats x2 ou x3. Les carapaces et boucliers bloquent : contourne-les.
+
+Totems (obelisques aux runes rouges) : E pour en activer un. Les monstres
+deviennent plus forts et plus nombreux, mais vous avez plus de chance et
+plus d'or. A 15:00 arrivent les fantomes : tenir jusque-la debloque la
+carte suivante (l'hote choisit la carte et la difficulte dans le salon).

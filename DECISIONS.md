@@ -263,3 +263,27 @@ refusé. Version actuelle :
   départ, comme les autres zones.
 - **Solo passe par le salon** : il fallait pouvoir choisir ses armes. La partie n'est simplement
   pas annoncée dans la liste publique (`config.solo`).
+
+## V5 : difficultés, cartes et totems
+
+- **Un seul fichier pour l'équilibrage** : `shared/rules.rs` contient les tableaux des 5
+  difficultés, des 3 cartes et des totems. `RunRules` (difficulté + carte + nombre de totems)
+  est répliqué dans `MatchInfo` : le serveur s'en sert pour les calculs, les clients pour
+  l'affichage (couleurs de la carte, texte du HUD).
+- **Les PV sont appliqués à un seul endroit** : un système (`apply_rules_to_new_mobs`) multiplie
+  la vie de tout monstre qui vient d'apparaître (`Added<Mob>`), quelle que soit son origine
+  (directeur, gelée qui se divise, invocation, statue). Pas besoin de toucher chaque `spawn_mob`.
+  Les dégâts sont multipliés dans l'IA, là où on calcule déjà les dégâts d'un monstre.
+- **Une carte = même générateur, autre peinture** : le relief vient toujours de la graine (pas de
+  nouvelle physique à tester). Chaque carte a sa palette de sol (`palette::Ground`), une fonction
+  `grade` qui reteint le décor partagé (feuilles sèches dans le désert, cristaux orange...), ses 4
+  ambiances de ciel, et sa liste de monstres et de boss.
+- **Le déblocage des cartes appartient à chaque joueur** (comme l'argent) : il est enregistré
+  dans `settings.txt` côté client quand le chrono passe 15:00. L'hôte ne peut choisir que les
+  cartes qu'il a débloquées.
+- **Les totems réutilisent les emplacements de coffres** (comme les sanctuaires) : une partie des
+  petits coffres devient un totem, de façon déterministe. Rien à changer dans le générateur.
+- **Le rythme de fin est en deux temps** : 15:00 les fantômes blancs arrivent de plus en plus vite
+  (+50 % par minute) et se renforcent de 20 % par minute ; 20:00 tout le reste s'arrête et seuls
+  les fantômes noirs arrivent, avec 15 % de force en plus par minute. C'est exponentiel exprès :
+  la partie *doit* finir.

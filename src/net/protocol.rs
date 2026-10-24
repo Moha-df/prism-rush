@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use crate::shared::economy::ChestKind;
 use crate::shared::items::{Inventory, ItemKind};
 use crate::shared::mobs::MobKind;
+use crate::shared::rules::{Difficulty, MapKind, RunRules};
 use crate::shared::movement::PlayerInput;
 use crate::shared::sim::PlayerSim;
 use crate::shared::build::{AutoWeapon, Loadout, MainWeapon, OfferCard};
@@ -17,7 +18,7 @@ use crate::shared::build::{AutoWeapon, Loadout, MainWeapon, OfferCard};
 pub const DEFAULT_PORT: u16 = 7777;
 pub const MAX_PLAYERS: usize = 4;
 /// Protocol version: bump when messages change, so old clients are refused.
-pub const PROTOCOL_VERSION: u32 = 4;
+pub const PROTOCOL_VERSION: u32 = 5;
 
 // ---------------------------------------------------------------------------
 // Replicated components
@@ -50,6 +51,8 @@ pub struct MatchInfo {
     pub swarm: u8,
     /// Monsters alive right now.
     pub enemies_left: u16,
+    /// Difficulty, map and totems of the run (chosen by the host in the lobby).
+    pub rules: RunRules,
 }
 
 /// Identity of a player: slot (0..4, also picks the color) and name.
@@ -218,6 +221,20 @@ pub struct Statue {
 /// Mutable statue state.
 #[derive(Component, Clone, Copy, Debug, Default, Serialize, Deserialize)]
 pub struct StatueUsed(pub bool);
+
+/// A totem of challenge: activating it makes the run harder for everyone,
+/// but luckier and more rewarding (see `rules.rs`).
+#[derive(Component, Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct Totem {
+    pub spot_id: u64,
+    pub pos: Vec3,
+}
+
+/// Mutable totem state.
+#[derive(Component, Clone, Copy, Debug, Default, Serialize, Deserialize)]
+pub struct TotemUsed(pub bool);
+
+pub const TOTEM_RANGE: f32 = 3.0;
 
 /// Charge shrine: stand in its circle until it is full, everyone inside
 /// gets a free level-up (Megabonk-like).
@@ -430,6 +447,8 @@ pub struct ChooseCard {
 pub enum LobbyCommand {
     Start,
     BackToLobby,
+    /// The host picks the difficulty and the map of the next run.
+    SetRules { difficulty: Difficulty, map: MapKind },
 }
 
 /// Server -> one client: your player slot.
@@ -498,6 +517,8 @@ pub enum GameEvent {
     NewMonster { kind: MobKind },
     /// A boss collapsed (legs broken): shoot it now!
     BossToppled { kind: MobKind },
+    /// A player activated a totem: `totems` are now active in this run.
+    TotemActivated { pos: Vec3, slot: u8, totems: u32 },
     GameOver(Box<RunSummary>),
 }
 
@@ -519,6 +540,7 @@ pub struct PlayerSummary {
 pub struct RunSummary {
     pub duration: f32,
     pub level: u32,
+    pub rules: RunRules,
     pub players: Vec<PlayerSummary>,
 }
 
@@ -542,6 +564,8 @@ pub fn register_protocol(app: &mut App) {
         .replicate_once::<Hazard>()
         .replicate_once::<Statue>()
         .replicate::<StatueUsed>()
+        .replicate_once::<Totem>()
+        .replicate::<TotemUsed>()
         .replicate_once::<Shrine>()
         .replicate::<ShrineCharge>()
         .replicate_once::<Powerup>()
@@ -631,6 +655,7 @@ mod tests {
         let summary = GameEvent::GameOver(Box::new(RunSummary {
             duration: 300.0,
             level: 5,
+            rules: RunRules { difficulty: Difficulty::Hard, map: MapKind::Swamp, totems: 2 },
             players: vec![PlayerSummary { name: "Zoé".into(), kills: 12, ..Default::default() }],
         }));
         match roundtrip(&summary) {

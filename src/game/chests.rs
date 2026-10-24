@@ -1,6 +1,7 @@
 //! Chests (server): spawned from the deterministic chest spots of the chunks
 //! around players, opened with gold. Item chests offer item cards; weapon
 //! shrines (`ChestKind::Weapon`) offer a free level-up (weapon upgrades).
+//! Some spots hold a charge shrine or a totem of challenge instead.
 
 use std::collections::{HashMap, HashSet};
 
@@ -14,7 +15,6 @@ use super::{ServerSet, SimTick};
 use crate::net::protocol::*;
 use crate::shared::economy::{self, ChestKind};
 use crate::shared::items::PlayerStats;
-use crate::shared::mobs::MobKind;
 use crate::shared::rng::{hash_combine, Rng};
 use crate::shared::worldgen::{chunk_of, CHUNK_SIZE};
 
@@ -31,11 +31,18 @@ pub struct ChestRegistry {
     pub statues_used: HashSet<u64>,
     /// Charge shrines (they stay once spawned).
     pub shrines: HashSet<u64>,
+    /// Totems (they stay once spawned too).
+    pub totems: HashSet<u64>,
 }
 
 /// Some small chest spots hold a charge shrine instead (deterministic).
 pub fn is_shrine_spot(spot: &crate::shared::worldgen::ChestSpot) -> bool {
     spot.kind == ChestKind::Small && spot.id % 4 == 1
+}
+
+/// ...and some others a totem of challenge.
+pub fn is_totem_spot(spot: &crate::shared::worldgen::ChestSpot) -> bool {
+    spot.kind == ChestKind::Small && spot.id % 7 == 3
 }
 
 /// Despawns the entity after a delay (opened chests linger a bit).
@@ -48,7 +55,7 @@ impl Plugin for ChestsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ChestRegistry>().add_systems(
             FixedUpdate,
-            (stream_chests, awaken_statues, open_chests, despawn_after).chain().in_set(ServerSet::World),
+            (stream_chests, awaken_statues, activate_totems, open_chests, despawn_after).chain().in_set(ServerSet::World),
         )
         .add_systems(PreUpdate, receive_choices.after(ServerSystems::Receive).run_if(in_state(ServerState::Running)));
     }
@@ -61,6 +68,7 @@ fn stream_chests(
     players: Query<&PlayerState>,
     chests: Query<(&Chest, &ChestOpen)>,
     tick: Res<SimTick>,
+    info: Single<&MatchInfo>,
 ) {
     // Twice per second is plenty.
     if !tick.0.is_multiple_of(30) {
@@ -78,13 +86,21 @@ fn stream_chests(
                         continue;
                     }
                     let used = registry.statues_used.contains(&st.id);
-                    let boss = MobKind::BOSSES[st.boss % MobKind::BOSSES.len()];
+                    // Statues hold the bosses of the current map.
+                    let bosses = info.rules.map.bosses();
+                    let boss = bosses[st.boss % bosses.len()];
                     let e = commands
                         .spawn((Replicated, Statue { spot_id: st.id, pos: st.pos, boss }, StatueUsed(used)))
                         .id();
                     registry.statues.insert(st.id, e);
                 }
                 for spot in &chunk.chests {
+                    if is_totem_spot(spot) {
+                        if registry.totems.insert(spot.id) {
+                            commands.spawn((Replicated, Totem { spot_id: spot.id, pos: spot.pos }, TotemUsed(false)));
+                        }
+                        continue;
+                    }
                     if is_shrine_spot(spot) {
                         if registry.shrines.insert(spot.id) {
                             commands.spawn((
@@ -188,14 +204,16 @@ fn open_chests(
         });
 
         let mut rng = Rng::new(hash_combine(&[chest.spot_id, u64::from(tick.0), u64::from(player.slot)]));
+        // Totems make every roll luckier.
+        let luck = stats.luck + info.rules.luck_bonus();
         let options: Vec<CardOption> = if chest.kind == ChestKind::Weapon {
             // Weapon shrine: a free level-up, with a luck bonus.
-            crate::shared::build::roll_offers(&gear.0, &items.0, &pool.0, stats.luck + 1.0, stats.cards, &mut rng)
+            crate::shared::build::roll_offers(&gear.0, &items.0, &pool.0, luck + 1.0, stats.cards, &mut rng)
                 .into_iter()
                 .map(CardOption::Offer)
                 .collect()
         } else {
-            crate::shared::items::roll_cards(chest.kind, stats.luck, stats.cards, &mut rng)
+            crate::shared::items::roll_cards(chest.kind, luck, stats.cards, &mut rng)
                 .into_iter()
                 .map(CardOption::Item)
                 .collect()
@@ -250,6 +268,31 @@ fn awaken_statues(
         info!("{} awakened a statue: {:?}", player.name, statue.boss);
         events.write(ToClients { targets: SendTargets::All, message: GameEvent::StatueAwakened { pos: statue.pos } });
         events.write(ToClients { targets: SendTargets::All, message: GameEvent::BossSpawned });
+    }
+}
+
+/// Pressing E at a totem: the whole run gets harder (tougher, more numerous
+/// monsters) but luckier and more rewarding. No way back!
+fn activate_totems(
+    mut players: Query<(&Player, &PlayerState, &mut Intent, &Health)>,
+    mut totems: Query<(&Totem, &mut TotemUsed)>,
+    mut info: Single<&mut MatchInfo>,
+    mut events: MessageWriter<ToClients<GameEvent>>,
+) {
+    for (player, state, mut intent, health) in &mut players {
+        if !intent.interact_pressed || health.downed {
+            continue;
+        }
+        let pos = state.sim.mv.pos;
+        let Some((totem, mut used)) = totems.iter_mut().find(|(t, u)| !u.0 && t.pos.distance(pos) < TOTEM_RANGE) else {
+            continue;
+        };
+        intent.interact_pressed = false;
+        used.0 = true;
+        info.rules.totems += 1;
+        let totems = info.rules.totems;
+        info!("{} activated a totem ({totems} active)", player.name);
+        events.write(ToClients { targets: SendTargets::All, message: GameEvent::TotemActivated { pos: totem.pos, slot: player.slot, totems } });
     }
 }
 

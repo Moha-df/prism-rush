@@ -841,17 +841,20 @@ fn apply_mob_damage(
             for (_, _, mut wallet, items, mut score, _) in &mut players {
                 let s = PlayerStats::from_inventory(&items.0);
                 let elite = if mob.elite { crate::game::mobs::ELITE_HP } else { 1.0 };
-                let gold = economy::kill_reward(mob.kind.def().gold * elite, info.difficulty, s.gold_mult);
+                let gold = economy::kill_reward(mob.kind.def().gold * elite, info.difficulty, s.gold_mult * info.rules.reward_mult());
                 wallet.gold += gold;
                 score.gold_earned += gold;
             }
             let mut drop_rng = Rng::new(u64::from(tick.0) ^ hit.target.to_bits());
             crate::game::pickups::maybe_drop_powerup(&mut commands, mob_state.pos, mob.elite, mob.kind.is_boss(), &mut drop_rng);
             // XP gem for the team (elites and bosses are worth more).
-            let xp = mob.kind.def().gold * if mob.elite { 3.0 } else { 1.0 } * if mob.kind.is_boss() { 5.0 } else { 1.0 };
+            let xp = mob.kind.def().gold
+                * if mob.elite { 3.0 } else { 1.0 }
+                * if mob.kind.is_boss() { 5.0 } else { 1.0 }
+                * info.rules.reward_mult();
             crate::game::progress::drop_gem(&mut commands, gem_count, mob_state.pos, xp, &mut info);
             // Splits, acid pools, delayed explosions...
-            crate::game::mobs::on_mob_death(&mut commands, mob, mob_state.pos, tick.0);
+            crate::game::mobs::on_mob_death(&mut commands, mob, mob_state.pos, tick.0, info.rules.damage_mult());
             if mob.kind.is_boss() {
                 // Bosses leave a legendary chest behind.
                 crate::game::chests::spawn_loot_chest(&mut commands, ChestKind::Legendary, mob_state.pos, u64::from(tick.0));

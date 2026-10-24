@@ -16,6 +16,8 @@ use super::MainCamera;
 use crate::game::world::TerrainRes;
 use crate::shared::noise::fbm;
 use crate::shared::rng::hash_2d;
+use crate::net::protocol::MatchInfo;
+use crate::shared::rules::MapKind;
 use crate::shared::worldgen::{chunk_of, WorldGen, CELL, CELLS_PER_CHUNK};
 
 /// Chunks visible around the camera (radius, in chunks). 4 => 9x9 chunks = 288 m.
@@ -26,7 +28,8 @@ const BUILDS_PER_FRAME: usize = 2;
 #[derive(Resource, Default)]
 struct LoadedChunks {
     map: HashMap<IVec2, Entity>,
-    seed: Option<u64>,
+    /// Seed and map the chunks were built for.
+    seed: Option<(u64, MapKind)>,
 }
 
 #[derive(Resource)]
@@ -59,26 +62,27 @@ fn setup_materials(mut commands: Commands, mut materials: ResMut<Assets<Standard
     });
 }
 
-/// Color of a terrain triangle from its height, slope and position.
-fn terrain_color(wgen: &WorldGen, center: Vec3, normal: Vec3) -> [f32; 4] {
+/// Color of a terrain triangle from its height, slope and position (the
+/// colors themselves come from the map, see `palette::Ground`).
+fn terrain_color(wgen: &WorldGen, ground: &palette::Ground, center: Vec3, normal: Vec3) -> [f32; 4] {
     let s = wgen.seed;
     let biome = fbm(s.wrapping_add(71), center.x / 140.0, center.z / 140.0, 2);
     let patch = fbm(s.wrapping_add(83), center.x / 18.0, center.z / 18.0, 2);
-    let mut c = mix(palette::GRASS_TEAL, palette::GRASS_A, (biome * 1.6 - 0.3).clamp(0.0, 1.0));
-    c = mix(c, palette::GRASS_B, (patch - 0.45).clamp(0.0, 0.5));
+    let mut c = mix(ground.low, ground.mid, (biome * 1.6 - 0.3).clamp(0.0, 1.0));
+    c = mix(c, ground.patch, (patch - 0.45).clamp(0.0, 0.5));
 
     let h = center.y;
     if h < -9.0 {
-        c = mix(c, palette::SAND, ((-9.0 - h) / 3.0).clamp(0.0, 1.0));
+        c = mix(c, ground.shore, ((-9.0 - h) / 3.0).clamp(0.0, 1.0));
     }
-    // Steep slopes: layered clay cliffs (strata bands by height).
+    // Steep slopes: layered cliffs (strata bands by height).
     let steep = ((0.82 - normal.y) / 0.12).clamp(0.0, 1.0);
     if steep > 0.0 {
-        let band = palette::CLAY[((h / 1.3).floor() as i32).rem_euclid(3) as usize];
+        let band = ground.cliffs[((h / 1.3).floor() as i32).rem_euclid(3) as usize];
         c = mix(c, band, steep);
     }
     if h > 20.0 && normal.y > 0.75 {
-        c = mix(c, palette::SNOW, ((h - 20.0) / 4.0).clamp(0.0, 1.0));
+        c = mix(c, ground.peak, ((h - 20.0) / 4.0).clamp(0.0, 1.0));
     }
     // Per-triangle brightness jitter: makes the facets readable.
     let jitter = (hash_2d(s, (center.x * 7.0) as i32, (center.z * 7.0) as i32) >> 40) as f32 / (1u64 << 24) as f32;
@@ -88,7 +92,8 @@ fn terrain_color(wgen: &WorldGen, center: Vec3, normal: Vec3) -> [f32; 4] {
     [lin.red, lin.green, lin.blue, 1.0]
 }
 
-fn build_terrain_mesh(wgen: &WorldGen, coord: IVec2) -> MeshBuffer {
+fn build_terrain_mesh(wgen: &WorldGen, map: MapKind, coord: IVec2) -> MeshBuffer {
+    let ground = palette::ground(map);
     let n = CELLS_PER_CHUNK;
     let ox = coord.x * n;
     let oz = coord.y * n;
@@ -110,7 +115,7 @@ fn build_terrain_mesh(wgen: &WorldGen, coord: IVec2) -> MeshBuffer {
             for tri in [[a, c, b], [d, b, c]] {
                 let normal = (tri[1] - tri[0]).cross(tri[2] - tri[0]).normalize_or_zero();
                 let center = (tri[0] + tri[1] + tri[2]) / 3.0;
-                buf.add_tri(tri, terrain_color(wgen, center, normal));
+                buf.add_tri(tri, terrain_color(wgen, ground, center, normal));
             }
         }
     }
@@ -126,14 +131,16 @@ fn stream_chunks(
     mut meshes: ResMut<Assets<Mesh>>,
     materials: Res<ChunkMaterials>,
     camera: Query<&GlobalTransform, With<MainCamera>>,
+    info: Query<&MatchInfo>,
 ) {
     let Ok(cam) = camera.single() else { return };
     let seed = terrain.wgen.seed;
-    if loaded.seed != Some(seed) {
+    let map = info.single().map(|m| m.rules.map).unwrap_or_default();
+    if loaded.seed != Some((seed, map)) {
         for (_, e) in loaded.map.drain() {
             commands.entity(e).try_despawn();
         }
-        loaded.seed = Some(seed);
+        loaded.seed = Some((seed, map));
     }
 
     let pos = cam.translation();
@@ -164,7 +171,7 @@ fn stream_chunks(
     let TerrainRes(t) = &mut *terrain;
     for coord in missing.into_iter().take(BUILDS_PER_FRAME) {
         let data = t.cache.get_or_generate(&t.wgen, coord);
-        let ground = build_terrain_mesh(&t.wgen, coord);
+        let ground = build_terrain_mesh(&t.wgen, map, coord);
 
         let mut props = MeshBuffer::default();
         let mut glow = MeshBuffer::default();
@@ -178,6 +185,14 @@ fn stream_chunks(
         }
         for d in &data.decor {
             props.add_part(&mut cache, &models::decor(d), &identity, &mut glow);
+        }
+
+        // Each map dyes the shared decor models.
+        for c in &mut props.colors {
+            *c = palette::grade(map, *c, false);
+        }
+        for c in &mut glow.colors {
+            *c = palette::grade(map, *c, true);
         }
 
         let root = commands.spawn((Transform::IDENTITY, Visibility::default(), Name::new(format!("chunk {coord}")))).id();

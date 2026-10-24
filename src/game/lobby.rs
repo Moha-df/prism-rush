@@ -19,6 +19,7 @@ use crate::net::{LocalPlayer, NetRole};
 use crate::shared::build::{AutoWeapon, Loadout, MainWeapon};
 use crate::shared::economy;
 use crate::shared::items::{Inventory, PlayerStats};
+use crate::shared::rules::RunRules;
 use crate::shared::sim::PlayerSim;
 use crate::shared::worldgen::Terrain;
 
@@ -72,6 +73,7 @@ fn setup_server_match(
             xp_next: economy::xp_to_next(1),
             swarm: 0,
             enemies_left: 0,
+            rules: RunRules { difficulty: config.difficulty, map: config.map, totems: 0 },
         },
     ));
     let mut slot = 0u8;
@@ -203,6 +205,7 @@ fn handle_lobby_commands(
     mut cmds: MessageReader<FromClient<LobbyCommand>>,
     role: Res<NetRole>,
     mut commands: Commands,
+    mut info: Single<&mut MatchInfo>,
 ) {
     for cmd in cmds.read() {
         // On a listen server only the host decides; on a dedicated server anyone can.
@@ -213,6 +216,13 @@ fn handle_lobby_commands(
         match cmd.message {
             LobbyCommand::Start => commands.run_system_cached(start_match),
             LobbyCommand::BackToLobby => commands.run_system_cached(back_to_lobby),
+            LobbyCommand::SetRules { difficulty, map } => {
+                // Only between runs: the rules of a running game never change.
+                if info.phase != Phase::Playing {
+                    info.rules = RunRules { difficulty, map, totems: 0 };
+                    info!("rules: {} on {}", difficulty.name(), map.name());
+                }
+            }
         }
     }
 }
@@ -255,7 +265,7 @@ pub fn start_match(
         SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1)
     });
     terrain.0 = Terrain::new(seed);
-    *director = Director::new(seed);
+    *director = Director::new(seed, info.rules.map);
     // Bosses whose time is already past (debug --start-time) are skipped.
     director.next_boss = crate::shared::economy::BOSS_TIMES.iter().filter(|t| **t <= config.start_time).count();
     *chests = ChestRegistry::default();
@@ -272,6 +282,7 @@ pub fn start_match(
     info.xp_next = economy::xp_to_next(1);
     info.swarm = 0;
     info.enemies_left = 0;
+    info.rules.totems = 0;
 
     for (entity, player) in &players {
         commands
@@ -279,7 +290,12 @@ pub fn start_match(
             .insert(run_components(&terrain, player.slot, player.main, player.start_auto))
             .insert((PlayerScore::default(), InputQueue::default(), super::progress::LevelUps::default()));
     }
-    info!("=== run started (seed {seed}, {} players) ===", players.iter().count());
+    info!(
+        "=== run started (seed {seed}, {} players, {} on {}) ===",
+        players.iter().count(),
+        info.rules.difficulty.name(),
+        info.rules.map.name()
+    );
 }
 
 /// Back to the lobby after a game over.
@@ -298,7 +314,7 @@ pub fn back_to_lobby(mut commands: Commands, mut info: Single<&mut MatchInfo>, p
 /// Despawns monsters, chests and projectiles (the run's world).
 pub fn despawn_world_entities(
     mut commands: Commands,
-    q: Query<Entity, Or<(With<Mob>, With<Chest>, With<Projectile>, With<Hazard>, With<Shrine>, With<Powerup>, With<Statue>, With<XpGem>)>>,
+    q: Query<Entity, Or<(With<Mob>, With<Chest>, With<Projectile>, With<Hazard>, With<Shrine>, With<Powerup>, With<Statue>, With<XpGem>, With<Totem>)>>,
 ) {
     for e in &q {
         commands.entity(e).try_despawn();
@@ -345,7 +361,7 @@ fn check_game_over(
         return;
     }
     info.phase = Phase::GameOver;
-    let mut summary = RunSummary { duration: info.elapsed, level: info.team_level, players: Vec::new() };
+    let mut summary = RunSummary { duration: info.elapsed, level: info.team_level, rules: info.rules, players: Vec::new() };
     for (player, _, score, items) in &players {
         summary.players.push(PlayerSummary {
             slot: player.slot,

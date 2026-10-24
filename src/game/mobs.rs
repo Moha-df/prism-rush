@@ -2,9 +2,11 @@
 //!
 //! The director earns a spawn budget that grows faster and faster with time
 //! and spends it in packs around the players (Megabonk-like hordes). Each
-//! run draws a random *roster* (a few monsters per role, see
-//! `shared::mobs::roll_roster`) and a random boss order, so two runs never
-//! look the same. Bosses come at fixed times, then the Final Swarm of ghosts.
+//! run draws a random *roster* among the monsters of its map (a few per
+//! role, see `shared::mobs::roll_roster`) and a random order of the map's
+//! bosses, so two runs never look the same. Bosses come at fixed times,
+//! then the Final Swarm: white ghosts at 15:00, only black ghosts at 20:00.
+//! The difficulty level and the totems scale everything (`shared::rules`).
 
 use std::collections::HashSet;
 
@@ -19,6 +21,7 @@ use crate::shared::economy;
 use crate::shared::mobs::{roll_bosses, roll_roster, MobKind, Role, LEG_HP};
 use crate::shared::movement::{move_body, DT, GRAVITY, PLAYER_HEIGHT};
 use crate::shared::rng::Rng;
+use crate::shared::rules::MapKind;
 
 /// Spawn state that only the server needs.
 #[derive(Resource)]
@@ -41,11 +44,11 @@ pub struct Director {
 }
 
 impl Director {
-    pub fn new(seed: u64) -> Self {
+    pub fn new(seed: u64, map: MapKind) -> Self {
         let mut rng = Rng::new(seed ^ 0xD1EC);
-        let roster = roll_roster(&mut rng);
-        let bosses = roll_bosses(&mut rng);
-        info!("run roster: {roster:?}, bosses: {bosses:?}");
+        let roster = roll_roster(&mut rng, map.monsters());
+        let bosses = roll_bosses(&mut rng, map.bosses());
+        info!("run roster ({map:?}): {roster:?}, bosses: {bosses:?}");
         Self { credits: 3.0, spawn_timer: 3.0, next_boss: 0, ghost_credits: 0.0, rng, spawned: 0, roster, bosses, seen: HashSet::new() }
     }
 
@@ -57,7 +60,7 @@ impl Director {
 
 impl Default for Director {
     fn default() -> Self {
-        Self::new(0)
+        Self::new(0, MapKind::Meadow)
     }
 }
 
@@ -105,7 +108,7 @@ impl Plugin for MobsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Director>().add_systems(
             FixedUpdate,
-            (director, bring_back_stragglers, mob_ai, separate_mobs).chain().in_set(ServerSet::Mobs),
+            (director, apply_rules_to_new_mobs, bring_back_stragglers, mob_ai, separate_mobs).chain().in_set(ServerSet::Mobs),
         );
     }
 }
@@ -143,9 +146,26 @@ pub fn spawn_mob(commands: &mut Commands, kind: MobKind, pos: Vec3, level: u32, 
     e.id()
 }
 
+/// Every new monster gets the HP of the run's difficulty, map and totems.
+/// (One place for all spawns: director, splits, summons, statues...)
+fn apply_rules_to_new_mobs(info: Single<&MatchInfo>, mut mobs: Query<(&mut Health, &mut MobAi), Added<Mob>>) {
+    let m = info.rules.hp_mult();
+    if m == 1.0 {
+        return;
+    }
+    for (mut health, mut ai) in &mut mobs {
+        health.max *= m;
+        health.hp *= m;
+        for leg in &mut ai.leg_hp {
+            *leg *= m;
+        }
+    }
+}
+
 /// What happens when a monster dies (besides loot): splits, pools, blasts.
-pub fn on_mob_death(commands: &mut Commands, mob: &Mob, pos: Vec3, tick: u32) {
-    let dmg = mob.kind.def().damage * economy::monster_damage_mult(mob.level);
+/// `dmg_scale`: damage multiplier of the run (`RunRules::damage_mult`).
+pub fn on_mob_death(commands: &mut Commands, mob: &Mob, pos: Vec3, tick: u32, dmg_scale: f32) {
+    let dmg = mob.kind.def().damage * economy::monster_damage_mult(mob.level) * dmg_scale;
     let split = |commands: &mut Commands, kind: MobKind, spread: f32| {
         for side in [-1.0f32, 1.0] {
             let p = pos + Vec3::new(side * spread, 0.3, 0.0);
@@ -226,6 +246,7 @@ fn director(
     info.enemies_left = alive_mobs as u16;
     let t = info.elapsed;
     let level = info.level;
+    let rules = info.rules;
 
     // --- Bosses at fixed times (random order each run).
     if let Some(&at) = economy::BOSS_TIMES.get(dir.next_boss)
@@ -249,13 +270,13 @@ fn director(
         events.write(ToClients { targets: SendTargets::All, message: GameEvent::SwarmStarted { black: swarm == 2 } });
         info!("FINAL SWARM phase {swarm} at {:.0}s", t);
     }
-    if swarm > 0 && alive_mobs < 160 {
-        dir.ghost_credits += economy::ghost_rate(t, n_players) * DT;
+    if swarm > 0 && alive_mobs < economy::MAX_MOBS {
+        dir.ghost_credits += economy::ghost_rate(t, n_players) * rules.spawn_mult() * DT;
         let mult = economy::swarm_mult(t);
         while dir.ghost_credits >= 1.0 {
             dir.ghost_credits -= 1.0;
-            let black = swarm == 2 && dir.rng.chance(((t - economy::BLACK_GHOSTS_TIME) / 300.0 + 0.3).min(0.85));
-            let kind = if black { MobKind::BlackGhost } else { MobKind::WhiteGhost };
+            // 15:00-20:00 white ghosts, then only black ones.
+            let kind = if swarm == 2 { MobKind::BlackGhost } else { MobKind::WhiteGhost };
             let pos = ring_point(&terrain, &mut dir.rng, &alive, 30.0, 40.0) + Vec3::Y * 2.0;
             let e = spawn_mob(&mut commands, kind, pos, level, tick.0, dir.rng.range(0.0, 100.0), false);
             let hp = kind.def().hp * economy::monster_hp_mult(level) * mult;
@@ -263,10 +284,15 @@ fn director(
         }
     }
 
-    // --- Regular monsters: a budget that grows faster and faster.
-    dir.credits += economy::spawn_rate(t, n_players) * DT;
+    // --- Regular monsters: a budget that grows faster and faster (they stop
+    // at 20:00, when only black ghosts come).
+    if !economy::regular_spawns(t) {
+        return;
+    }
+    dir.credits += economy::spawn_rate(t, n_players) * rules.spawn_mult() * DT;
     dir.spawn_timer -= DT;
-    if dir.spawn_timer > 0.0 || alive_mobs >= economy::max_alive_time(t, n_players) {
+    let cap = ((economy::max_alive_time(t, n_players) as f32 * rules.spawn_mult().sqrt()) as usize).min(160);
+    if dir.spawn_timer > 0.0 || alive_mobs >= cap {
         return;
     }
     dir.spawn_timer = dir.rng.range(0.5, 1.4);
@@ -292,7 +318,7 @@ fn director(
         let offset = Vec3::new(dir.rng.range(-3.0, 3.0), 0.0, dir.rng.range(-3.0, 3.0));
         let mut pos = center + offset;
         pos.y = terrain.wgen.ground_height(pos.x, pos.z) + if kind.def().flying { 6.0 } else { 0.2 };
-        let elite = dir.rng.chance(elite_chance(t));
+        let elite = dir.rng.chance((elite_chance(t) * rules.elite_mult()).min(0.6));
         let phase = dir.rng.range(0.0, 100.0);
         spawn_mob(&mut commands, kind, pos, level, tick.0, phase + i as f32, elite);
         dir.credits -= cost;
@@ -374,7 +400,10 @@ fn mob_ai(
     mut explode: MessageWriter<Explode>,
     mut heal: MessageWriter<HealMobs>,
     mut fx: MessageWriter<ToClients<Fx>>,
+    info: Query<&MatchInfo>,
 ) {
+    // Damage of the difficulty, map and totems.
+    let rules_dmg = info.single().map(|m| m.rules.damage_mult()).unwrap_or(1.0);
     let targets: Vec<(Entity, Vec3, Vec3)> = players
         .iter()
         .filter(|(_, _, h)| !h.downed)
@@ -388,7 +417,7 @@ fn mob_ai(
         }
         let def = mob.kind.def();
         let ghost_mult = ghost.map(|g| g.0).unwrap_or(1.0);
-        let dmg_mult = economy::monster_damage_mult(mob.level) * if mob.elite { ELITE_DAMAGE } else { 1.0 } * ghost_mult;
+        let dmg_mult = economy::monster_damage_mult(mob.level) * if mob.elite { ELITE_DAMAGE } else { 1.0 } * ghost_mult * rules_dmg;
         let damage_amount = def.damage * dmg_mult;
         ai.phase += DT;
         ai.cooldown -= DT;
@@ -675,7 +704,7 @@ fn mob_ai(
                         }
                         MobKind::Sporeling => {
                             explode_at(&mut explode, state.pos + Vec3::Y * 0.6, 2.5, damage_amount);
-                            on_mob_death(&mut commands, mob, state.pos, tick.0);
+                            on_mob_death(&mut commands, mob, state.pos, tick.0, rules_dmg);
                             commands.entity(entity).try_despawn();
                             continue;
                         }
@@ -942,10 +971,13 @@ mod tests {
 
     #[test]
     fn each_run_has_its_own_roster() {
-        let a = Director::new(1);
-        let b = Director::new(2);
+        let a = Director::new(1, MapKind::Meadow);
+        let b = Director::new(2, MapKind::Meadow);
         assert!(a.roster != b.roster || a.bosses != b.bosses);
         // Same seed, same run (everyone sees the same thing).
-        assert_eq!(Director::new(7).roster, Director::new(7).roster);
+        assert_eq!(Director::new(7, MapKind::Swamp).roster, Director::new(7, MapKind::Swamp).roster);
+        // Each map has its own bosses.
+        let desert = Director::new(3, MapKind::Embers);
+        assert!(desert.bosses.iter().all(|b| MapKind::Embers.bosses().contains(b)));
     }
 }

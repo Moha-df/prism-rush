@@ -40,7 +40,7 @@ fn store_summary(
                 .players
                 .iter()
                 .find(|p| Some(p.slot) == local.slot)
-                .map(|p| crate::shared::economy::silver_reward(summary.duration, p.kills, summary.level))
+                .map(|p| crate::shared::economy::silver_reward(summary.duration, p.kills, summary.level, summary.rules.silver_mult()))
                 .unwrap_or(0);
             last.1 = silver;
             if silver > 0 {

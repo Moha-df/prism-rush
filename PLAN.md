@@ -94,6 +94,16 @@ On garde **le même monde procédural, le même moteur et le même netcode**.
 | V4.4 | Zones de dégâts : points faibles ×2/×3, carapaces et boucliers, pattes cassables, boss au sol (vulnérable), monstres sous terre (invulnérables) | fait |
 | V4.5 | 3 nouveaux boss (Mère-araignée, Golem ancien, Ver des sables), modèles, zones d'attaque au sol (mortier, magma, acide, lave), laser | fait |
 
+## V5 — Difficultés, cartes et totems
+
+| # | Contenu | État |
+|---|---------|------|
+| V5.1 | 5 niveaux de difficulté (Facile → Impossible) choisis par l'hôte dans le salon, en solo comme en multi : PV, dégâts, nombre de monstres, élites, argent gagné | fait |
+| V5.2 | 3 cartes (Prairie, Désert de braise, Marais maudit) : même générateur, couleurs du sol, du décor et du ciel propres, brouillard, monstres et boss propres | fait |
+| V5.3 | Déblocage : tenir 15:00 sur une carte débloque la suivante (enregistré dans settings.txt) | fait |
+| V5.4 | Rythme de fin : 15:00 fantômes blancs (censés tuer), 20:00 plus que des fantômes noirs, de plus en plus rapides et forts | fait (à équilibrer) |
+| V5.5 | Totems de défi : plus de monstres, plus forts, mais plus de chance, d'or et d'XP ; cumulables | fait (à équilibrer) |
+
 ## Reste à faire / idées
 
 - Équilibrage fin après des parties à plusieurs (armes, cadence des hordes, prix).

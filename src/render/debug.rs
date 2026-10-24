@@ -68,6 +68,8 @@ fn demo_scene(
         Ok("4") => vec![Broodmother, AncientGolem],
         Ok("5") => vec![Sandworm, Colossus],
         Ok("6") => vec![Broodmother],
+        // Map view: no monster, just a totem.
+        Ok("7") => vec![],
         _ => vec![Charger, Jelly, Shaman, HiveQueen, StormTitan],
     };
     let (spacing, dist) = match (gallery.len(), gallery_mode) {
@@ -86,6 +88,14 @@ fn demo_scene(
                 commands.entity(e).insert(crate::net::protocol::MobParts { broken: 0b0101 });
             }
         }
+    }
+    let totem_at = if gallery_mode { forward * 9.0 } else { forward * 8.0 + right * 6.0 };
+    if !gallery_mode || gallery.is_empty() {
+        commands.spawn((
+            bevy_replicon::prelude::Replicated,
+            crate::net::protocol::Totem { spot_id: 43, pos: state.sim.mv.pos + totem_at },
+            crate::net::protocol::TotemUsed(false),
+        ));
     }
     if gallery_mode {
         return;

@@ -61,6 +61,78 @@ pub const GOLD: Color = rgb(0.98, 0.76, 0.28);
 pub const STEEL: Color = rgb(0.30, 0.33, 0.40);
 pub const TEAL_GLOW: Color = rgb(0.25, 0.95, 0.85);
 
+/// Ground colors of a map (terrain mesh vertex colors).
+pub struct Ground {
+    /// Lowlands / large biome patches.
+    pub low: [f32; 3],
+    pub mid: [f32; 3],
+    /// Small patches.
+    pub patch: [f32; 3],
+    /// Deep valleys.
+    pub shore: [f32; 3],
+    /// Strata of steep cliffs.
+    pub cliffs: [[f32; 3]; 3],
+    /// Mountain tops.
+    pub peak: [f32; 3],
+}
+
+pub const GROUND_MEADOW: Ground = Ground { low: GRASS_TEAL, mid: GRASS_A, patch: GRASS_B, shore: SAND, cliffs: CLAY, peak: SNOW };
+
+/// Desert of embers: orange dunes, red rock, dark basalt valleys, ash peaks.
+pub const GROUND_EMBERS: Ground = Ground {
+    low: [0.80, 0.52, 0.30],
+    mid: [0.90, 0.68, 0.42],
+    patch: [0.74, 0.40, 0.26],
+    shore: [0.26, 0.18, 0.18],
+    cliffs: [[0.62, 0.26, 0.18], [0.50, 0.22, 0.17], [0.74, 0.38, 0.24]],
+    peak: [0.32, 0.24, 0.24],
+};
+
+/// Cursed swamp: dark moss, purple mud, murky valleys, pale lichen.
+pub const GROUND_SWAMP: Ground = Ground {
+    low: [0.19, 0.25, 0.21],
+    mid: [0.27, 0.30, 0.20],
+    patch: [0.30, 0.24, 0.33],
+    shore: [0.11, 0.19, 0.20],
+    cliffs: [[0.30, 0.27, 0.34], [0.24, 0.22, 0.28], [0.37, 0.33, 0.39]],
+    peak: [0.56, 0.66, 0.56],
+};
+
+pub fn ground(map: crate::shared::rules::MapKind) -> &'static Ground {
+    use crate::shared::rules::MapKind;
+    match map {
+        MapKind::Meadow => &GROUND_MEADOW,
+        MapKind::Embers => &GROUND_EMBERS,
+        MapKind::Swamp => &GROUND_SWAMP,
+    }
+}
+
+/// Recolors a prop vertex color (linear RGBA) for a map: the decor models
+/// are shared, each map dyes them (dry leaves in the desert, dark teal in
+/// the swamp, crystals glowing orange or toxic green...).
+pub fn grade(map: crate::shared::rules::MapKind, c: [f32; 4], glow: bool) -> [f32; 4] {
+    use crate::shared::rules::MapKind;
+    let [r, g, b, a] = c;
+    let lum = 0.3 * r + 0.55 * g + 0.15 * b;
+    let greenish = g > r * 1.05 && g > b;
+    match map {
+        MapKind::Meadow => c,
+        MapKind::Embers if glow => {
+            // Cyan / pink crystals become embers.
+            let m = r.max(g).max(b);
+            [m, m * 0.4, m * 0.08, a]
+        }
+        MapKind::Embers if greenish => [lum * 1.35, lum * 0.8, lum * 0.35, a],
+        MapKind::Embers => [r * 1.05, g * 0.9, b * 0.8, a],
+        MapKind::Swamp if glow => {
+            let m = r.max(g).max(b);
+            [m * 0.55, m, m * 0.25, a]
+        }
+        MapKind::Swamp if greenish => [lum * 0.45, lum * 0.85, lum * 0.7, a],
+        MapKind::Swamp => [r * 0.55, g * 0.62, b * 0.66, a],
+    }
+}
+
 /// Mixes two RGB triplets.
 pub fn mix(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
     [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]

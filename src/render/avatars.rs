@@ -64,6 +64,7 @@ impl Plugin for AvatarsPlugin {
                 update_anim_states,
                 grow_shockwaves,
                 dim_used_statues,
+                dim_used_totems,
                 hit_pop,
                 fill_shrines,
                 show_mounds,
@@ -168,6 +169,17 @@ fn dim_used_statues(statues: Query<(&StatueUsed, &HasModel), Changed<StatueUsed>
     }
 }
 
+/// An activated totem sinks into the ground: its curse is now on the run.
+fn dim_used_totems(totems: Query<(&TotemUsed, &HasModel), Changed<TotemUsed>>, mut models: Query<&mut Transform, Without<HasModel>>) {
+    for (used, has) in &totems {
+        if used.0
+            && let Ok(mut t) = models.get_mut(has.model)
+        {
+            t.translation.y = -1.6;
+        }
+    }
+}
+
 fn spawn_child_model(
     commands: &mut Commands,
     cache: &mut PrimCache,
@@ -198,6 +210,7 @@ fn attach_models(
     gems: Query<(Entity, &XpGem), NeedsModel>,
     shrines: Query<(Entity, &Shrine), NeedsModel>,
     powerups: Query<(Entity, &Powerup), NeedsModel>,
+    totems: Query<(Entity, &Totem), NeedsModel>,
 ) {
     let mut attach = |commands: &mut Commands, entity: Entity, part: super::model::Part, stride: f32| {
         let model = spawn_child_model(commands, &mut cache, &mut meshes, &mut materials, entity, &part);
@@ -224,6 +237,9 @@ fn attach_models(
     }
     for (e, s) in &statues {
         attach(&mut commands, e, models::statue(s.boss), 1.0);
+    }
+    for (e, _) in &totems {
+        attach(&mut commands, e, models::totem(), 1.0);
     }
     for (e, g) in &gems {
         attach(&mut commands, e, models::xp_gem(g.value), 1.0);
@@ -340,7 +356,11 @@ fn place_chests(
     gems: Query<(Entity, &XpGem), Without<Transform>>,
     shrines: Query<(Entity, &Shrine), Without<Transform>>,
     powerups: Query<(Entity, &Powerup), Without<Transform>>,
+    totems: Query<(Entity, &Totem), Without<Transform>>,
 ) {
+    for (e, t) in &totems {
+        commands.entity(e).try_insert((Transform::from_translation(t.pos), Visibility::default()));
+    }
     for (e, g) in &gems {
         commands.entity(e).try_insert((Transform::from_translation(g.pos), Visibility::default()));
     }

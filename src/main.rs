@@ -40,6 +40,12 @@ struct Cli {
     /// Debug: start runs at this time in seconds (e.g. 900 = Final Swarm).
     #[arg(long, global = true, default_value_t = 0.0)]
     start_time: f32,
+    /// Map of the run: 0 = Prairie, 1 = Désert de braise, 2 = Marais maudit.
+    #[arg(long, global = true)]
+    map: Option<usize>,
+    /// Difficulty: 0 = Facile ... 4 = Impossible.
+    #[arg(long, global = true)]
+    difficulty: Option<usize>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -148,6 +154,12 @@ fn main() {
     config.autopilot = cli.autopilot;
     config.duration = cli.duration;
     config.start_time = cli.start_time;
+    if let Some(m) = cli.map.and_then(|i| prism_rush::shared::rules::MapKind::ALL.get(i)) {
+        config.map = *m;
+    }
+    if let Some(d) = cli.difficulty.and_then(|i| prism_rush::shared::rules::Difficulty::ALL.get(i)) {
+        config.difficulty = *d;
+    }
 
     config.launch = match cli.command.unwrap_or(Command::Menu) {
         Command::Menu => LaunchMode::Menu,

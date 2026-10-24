@@ -30,6 +30,11 @@ pub enum UiAction {
     JoinListed(u8),
     /// Copy the host code to the clipboard.
     CopyCode,
+    /// Lobby (host): previous / next map and difficulty.
+    MapPrev,
+    MapNext,
+    DiffPrev,
+    DiffNext,
 }
 
 pub const TEXT: Color = Color::srgb(0.95, 0.93, 0.9);

@@ -111,18 +111,52 @@ Les touches suivent la **position** physique : ZQSD sur AZERTY, WASD sur QWERTY.
 
 ### Le principe
 
-Une seule carte infinie, un chrono qui tourne, et des hordes de plus en plus nombreuses.
+Une carte infinie, un chrono qui tourne, et des hordes de plus en plus nombreuses.
 Il n'y a **pas de fin** : le but est de **survivre le plus longtemps possible**.
 
 - Les monstres lâchent des **gemmes d'XP** bleues. Passe près d'elles pour les ramasser.
   L'XP va à **toute l'équipe** : vous montez de niveau ensemble.
 - À chaque **niveau**, chaque joueur choisit **1 carte parmi 3** (pas de pause, le jeu continue).
-- **Boss** à 4:00, 8:00 et 12:00, tirés au sort parmi 6 à chaque partie. Chaque boss lâche un
+- **Boss** à 4:00, 8:00 et 12:00, tirés au sort parmi les 3 boss de la carte. Chaque boss lâche un
   coffre légendaire.
-- **15:00 : l'Essaim final.** Des **fantômes blancs** traversent tout et foncent sur vous.
-- **20:00 : les fantômes noirs** arrivent. Les fantômes deviennent **plus rapides, plus résistants
-  et plus forts chaque minute**, sans limite : au bout d'un moment, c'est impossible. Combien de
-  temps tiendrez-vous ?
+- **15:00 : l'Essaim final.** Des **fantômes blancs** traversent tout et foncent sur vous, de plus
+  en plus nombreux et forts chaque minute : normalement, c'est là qu'on meurt. **Tenir jusqu'à
+  15:00 débloque la carte suivante.**
+- **20:00 : plus que des fantômes noirs.** Les monstres normaux et les fantômes blancs
+  s'arrêtent : seuls les fantômes noirs arrivent, **plus rapides, plus résistants et plus forts
+  chaque minute**, sans limite. C'est pour les builds complètement cassés.
+
+### Difficulté et cartes (choisies par l'hôte dans le salon)
+
+**5 niveaux de difficulté** (flèches `<` `>` dans le salon, en solo comme en multi) :
+
+| Niveau | Monstres | Argent gagné |
+|---|---|---|
+| Facile | PV ×0,6, dégâts ×0,5, moins nombreux | ×0,5 |
+| Normal | l'expérience prévue | ×1 |
+| Difficile | PV ×1,45, dégâts ×1,3, plus nombreux | ×1,4 |
+| Cauchemar | PV ×2,1, dégâts ×1,7, hordes énormes | ×1,9 |
+| Impossible | PV ×3,2, dégâts ×2,4, élites partout | ×2,6 |
+
+**3 cartes**, chacune avec son ambiance, **ses propres monstres et ses 3 boss** :
+
+| Carte | Ambiance | Monstres typiques | Boss |
+|---|---|---|---|
+| Prairie du crépuscule | collines vertes | araignées, puces, scarabées, gelées, brutes, chevaliers | Colosse, Reine de la ruche, Mère-araignée |
+| Désert de braise | dunes orange, roches rouges | fouisseurs, gelées de magma, mortiers, chauves-souris de feu, golems de pierre, sangliers de lave | Ver des sables, Golem ancien, Colosse |
+| Marais maudit | brume verte, nuit noire | gelées toxiques, champignons, yeux, méduses célestes, golems de cristal, invocateurs | Titan de foudre, Mère-araignée, Reine de la ruche |
+
+Au début, seule la Prairie est disponible. **Survivre 15 minutes** sur une carte débloque la
+suivante (sur ton PC). Les cartes suivantes sont un peu plus dures et rapportent plus d'argent.
+
+### Totems de défi
+
+Des **totems** (obélisques sombres aux runes rouges, surmontés d'un crâne à cornes) sont
+dispersés sur la carte. Appuie sur **E** pour en activer un : **pour toute l'équipe et jusqu'à
+la fin de la partie**, les monstres ont **+12 % de PV**, **+8 % de dégâts** et sont **10 % plus
+nombreux**… mais vous gagnez **+0,4 de chance** (de meilleures raretés dans les coffres et les
+cartes de niveau) et **+8 % d'or et d'XP**. Ça se cumule : à vous de voir jusqu'où vous osez aller.
+Le nombre de totems actifs s'affiche sous le chrono.
 
 ### Deux catégories d'armes
 
@@ -195,19 +229,20 @@ roi…) s'ajoutent à tout ça. Ils ont chacun leur icône dessinée par le code
   carte), **Soin** d'équipe, **Bombe** (rase les monstres autour), **Hâte**.
 - **Statues de boss** : appuie sur **E** pour invoquer leur boss tout de suite. C'est risqué, mais
   le boss lâche un coffre légendaire.
+- **Totems de défi** : voir plus haut (plus dur, mais plus de chance).
 
 ### Argent (métal) : la progression entre les parties
 
 À la fin de chaque partie, tu gagnes de l'**argent** (selon le temps survécu, tes kills et le niveau
-atteint). Dans le **salon**, clique sur une arme verrouillée pour la **débloquer**. L'argent et les
+atteint, multiplié selon la difficulté et la carte). Dans le **salon**, clique sur une arme verrouillée pour la **débloquer**. L'argent et les
 déblocages sont enregistrés sur ton PC (`settings.txt`).
 
 ### Monstres
 
-**Chaque partie a ses propres monstres.** Il y a 34 monstres répartis par **rôle** (petits rapides,
-gelées, tireurs, kamikazes, tanks, soutiens, chargeurs, boss) et par **moment de la partie**
-(début, milieu, fin). À chaque partie, le jeu tire au sort quelques monstres de chaque rôle : une
-fois ce seront des araignées et des scarabées, une autre fois des puces et des fouisseurs. La
+**Chaque carte a ses monstres, et chaque partie les siens.** Il y a 34 monstres répartis par
+**rôle** (petits rapides, gelées, tireurs, kamikazes, tanks, soutiens, chargeurs, boss) et par
+**moment de la partie** (début, milieu, fin). Chaque carte en a une quinzaine, et à chaque partie
+le jeu tire au sort quelques monstres de chaque rôle parmi ceux de la carte. La
 première fois qu'un monstre apparaît, un message rappelle ce qu'il fait.
 
 **Points faibles** : ce qui **brille** (orange, rose, cyan) sur un gros monstre est un point
@@ -225,7 +260,7 @@ balles (chiffre gris, -75 à -90 %) : contourne-les.
 | Chargeurs | Chargeur, **Sanglier de lave** (laisse de la lave en chargeant) | écarte-toi de sa ligne |
 | Essaim final | Fantôme blanc / noir | traversent les murs, de plus en plus forts |
 
-**Boss** (3 par partie, tirés au sort parmi 6) :
+**Boss** (3 par carte, dans un ordre tiré au sort) :
 
 | Boss | Comment le battre |
 |---|---|
@@ -249,17 +284,21 @@ Un coéquipier te relève en maintenant E près de toi. Si tout le monde est à 
 ## 5. Pour les curieux / développeurs
 
 ```bash
-cargo test --lib                     # 90 tests : monde déterministe, mouvement, armes, économie, réseau...
+cargo test --lib                     # 93 tests : monde déterministe, mouvement, armes, économie, réseau...
 cargo clippy --all-targets           # aucun avertissement
 cargo run --release -- server --headless --bots 3 --autostart --duration 120   # partie sans fenêtre
 cargo run --release -- bot                                                     # client bot : rejoint la 1re partie de la liste
 cargo run --release -- solo --autopilot --shots captures                       # captures d'écran auto
+cargo run --release -- --map 2 --difficulty 4 solo                             # forcer carte (0-2) et difficulté (0-4)
+cargo run --release -- --start-time 900 solo                                   # commencer à 15:00 (tester l'essaim)
 ```
 
 - **Logs** : `target\release\logs\prism_rush.log` (et `prism_rush.prev.log` pour la partie
   précédente). En cas de plantage, la raison est dans `logs\crash.log`.
-- **Réglages** (pseudo, dernière adresse, sensibilité, volume, FOV, argent et armes débloquées) :
-  `settings.txt`.
+- **Réglages** (pseudo, dernière adresse, sensibilité, volume, FOV, argent, armes et cartes
+  débloquées, dernière difficulté et carte choisies) : `settings.txt`.
+- **Équilibrage** : toutes les valeurs des difficultés, des cartes et des totems sont dans
+  `src/shared/rules.rs` ; le rythme des fantômes est dans `src/shared/economy.rs`.
 - **Architecture et choix techniques** : voir [`DECISIONS.md`](DECISIONS.md). Plan des jalons :
   [`PLAN.md`](PLAN.md).
 

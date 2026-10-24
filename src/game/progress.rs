@@ -102,6 +102,7 @@ fn offer_level_ups(
     mut commands: Commands,
     mut players: Query<(Entity, &Player, &mut LevelUps, &Items, &Gear, &AutoPool), Without<PendingChoice>>,
     tick: Res<SimTick>,
+    info: Single<&MatchInfo>,
 ) {
     for (entity, player, mut level_ups, items, gear, pool) in &mut players {
         if level_ups.0 == 0 {
@@ -110,7 +111,8 @@ fn offer_level_ups(
         level_ups.0 -= 1;
         let stats = PlayerStats::from_inventory(&items.0);
         let mut rng = Rng::new(hash_combine(&[u64::from(tick.0), u64::from(player.slot), 0x1E7E1]));
-        let options = roll_offers(&gear.0, &items.0, &pool.0, stats.luck, stats.cards, &mut rng)
+        let luck = stats.luck + info.rules.luck_bonus();
+        let options = roll_offers(&gear.0, &items.0, &pool.0, luck, stats.cards, &mut rng)
             .into_iter()
             .map(CardOption::Offer)
             .collect();

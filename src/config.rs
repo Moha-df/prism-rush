@@ -6,6 +6,7 @@
 use bevy::prelude::*;
 
 use crate::shared::build::{AutoWeapon, MainWeapon};
+use crate::shared::rules::{Difficulty, MapKind};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LaunchMode {
@@ -52,6 +53,12 @@ pub struct AppConfig {
     pub unlocked_autos: Vec<AutoWeapon>,
     /// Silver earned in runs, spent in the menu to unlock weapons.
     pub silver: u32,
+    /// Difficulty and map picked in the lobby (host).
+    pub difficulty: Difficulty,
+    pub map: MapKind,
+    /// Number of maps unlocked (1 = only the first). Surviving 15 minutes on
+    /// a map unlocks the next one.
+    pub maps_unlocked: usize,
 }
 
 /// Indices <-> list, for the settings file ("0,3,5").
@@ -70,6 +77,10 @@ impl AppConfig {
 
     pub fn is_unlocked_auto(&self, a: AutoWeapon) -> bool {
         a.def().starter || self.unlocked_autos.contains(&a)
+    }
+
+    pub fn is_unlocked_map(&self, map: MapKind) -> bool {
+        map.index() < self.maps_unlocked
     }
 
     /// Automatic weapons that can be offered in a run.
@@ -104,6 +115,9 @@ impl Default for AppConfig {
             unlocked_mains: Vec::new(),
             unlocked_autos: Vec::new(),
             silver: 0,
+            difficulty: Difficulty::Normal,
+            map: MapKind::Meadow,
+            maps_unlocked: 1,
         }
     }
 }
@@ -129,6 +143,17 @@ impl AppConfig {
                 "unlocked_mains" => cfg.unlocked_mains = parse_list(value, &MainWeapon::ALL),
                 "unlocked_autos" => cfg.unlocked_autos = parse_list(value, &AutoWeapon::ALL),
                 "start_auto" => cfg.start_auto = parse_list(value, &AutoWeapon::ALL).first().copied(),
+                "difficulty" => {
+                    if let Some(d) = parse_list(value, &Difficulty::ALL).first() {
+                        cfg.difficulty = *d;
+                    }
+                }
+                "map" => {
+                    if let Some(m) = parse_list(value, &MapKind::ALL).first() {
+                        cfg.map = *m;
+                    }
+                }
+                "maps_unlocked" => cfg.maps_unlocked = value.parse::<usize>().unwrap_or(1).clamp(1, MapKind::ALL.len()),
                 "main_weapon" => {
                     if let Some(w) = parse_list(value, &MainWeapon::ALL).first() {
                         cfg.main_weapon = *w;
@@ -143,12 +168,15 @@ impl AppConfig {
         if cfg.start_auto.is_some_and(|a| !cfg.is_unlocked_auto(a)) {
             cfg.start_auto = Some(AutoWeapon::Aura);
         }
+        if !cfg.is_unlocked_map(cfg.map) {
+            cfg.map = MapKind::Meadow;
+        }
         cfg
     }
 
     pub fn save(&self) {
         let text = format!(
-            "name={}\nlast_address={}\nsensitivity={}\nfov={}\nvolume={}\nsilver={}\nmain_weapon={}\nstart_auto={}\nunlocked_mains={}\nunlocked_autos={}\n",
+            "name={}\nlast_address={}\nsensitivity={}\nfov={}\nvolume={}\nsilver={}\nmain_weapon={}\nstart_auto={}\nunlocked_mains={}\nunlocked_autos={}\ndifficulty={}\nmap={}\nmaps_unlocked={}\n",
             self.name,
             self.last_address,
             self.sensitivity,
@@ -159,6 +187,9 @@ impl AppConfig {
             self.start_auto.map(|a| a.index().to_string()).unwrap_or_default(),
             format_list(self.unlocked_mains.iter().map(|w| w.index())),
             format_list(self.unlocked_autos.iter().map(|a| a.index())),
+            self.difficulty.index(),
+            self.map.index(),
+            self.maps_unlocked,
         );
         if let Err(e) = std::fs::write(SETTINGS_FILE, text) {
             warn!("could not save settings: {e}");

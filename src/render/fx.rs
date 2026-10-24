@@ -417,6 +417,14 @@ fn on_game_events(
                 sfx.write(PlaySfx::ui(Sfx::Revived));
             }
             GameEvent::NewMonster { .. } => {}
+            GameEvent::TotemActivated { pos, .. } => {
+                let p = *pos + Vec3::Y * 2.0;
+                let red = Color::srgb(1.0, 0.15, 0.1);
+                burst(&mut commands, &mut cache, &mut meshes, &mut materials, rng, p, 40, red, 6.0, 8.0, 0.14, 1.2, -1.0);
+                tracer(&mut commands, &mut cache, &mut meshes, &mut materials, p, p + Vec3::Y * 40.0, red, 0.8);
+                flash_light(&mut commands, p + Vec3::Y, red, 2_000_000.0, 25.0, 0.9);
+                sfx.write(PlaySfx::ui(Sfx::BossRoar));
+            }
             GameEvent::BossToppled { .. } => {
                 sfx.write(PlaySfx::ui(Sfx::BossRoar));
             }

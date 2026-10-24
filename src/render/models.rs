@@ -788,6 +788,34 @@ pub fn shrine() -> Part {
     p
 }
 
+/// Totem of challenge: a dark obelisk with burning red runes and horns.
+pub fn totem() -> Part {
+    let red = rgb(1.0, 0.18, 0.12);
+    let mut p = Part::pivot()
+        .with(Part::cylinder(1.5, 0.35).at(0.0, 0.17, 0.0).color(STONE_DARK))
+        .with(Part::frustum(0.9, 0.6).at(0.0, 0.5, 0.0).color(STONE))
+        .with(Part::frustum(0.55, 3.2).at(0.0, 2.3, 0.0).color(PLUM_DARK))
+        // Skull-like head with glowing eyes and two horns.
+        .with(Part::ico(0.75, 0.7, 0.7).at(0.0, 4.2, 0.0).color(BONE))
+        .with(Part::sphere(0.14).at(0.22, 4.25, -0.58).color(red).glow(6.0))
+        .with(Part::sphere(0.14).at(-0.22, 4.25, -0.58).color(red).glow(6.0))
+        .with(Part::cone(0.18, 0.9).at(0.55, 4.7, 0.0).rot_z(-35.0).color(BONE))
+        .with(Part::cone(0.18, 0.9).at(-0.55, 4.7, 0.0).rot_z(35.0).color(BONE))
+        // Floating red flame above it.
+        .with(Part::ico(0.35, 0.6, 0.35).at(0.0, 5.4, 0.0).color(red).glow(5.0).tag(AnimTag::Bob))
+        .with(Part::torus(1.3, 0.08).at(0.0, 0.4, 0.0).color(red).glow(3.0).tag(AnimTag::Pulse));
+    // Runes on the 4 sides of the pillar.
+    for i in 0..4 {
+        let a = i as f32 * std::f32::consts::FRAC_PI_2;
+        for k in 0..3 {
+            let y = 1.3 + k as f32 * 0.8;
+            let r = 0.5 - k as f32 * 0.05;
+            p = p.with(Part::cube(0.18, 0.4, 0.06).at(a.sin() * r, y, a.cos() * r).rot_y(a.to_degrees()).color(red).glow(3.5));
+        }
+    }
+    p
+}
+
 /// A floating power-up.
 pub fn powerup(kind: PowerupKind) -> Part {
     let icon = match kind {
