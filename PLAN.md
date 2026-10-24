@@ -73,19 +73,21 @@ On garde **le même monde procédural, le même moteur et le même netcode**.
   fait ses choix.
 
 ### Jalons
-| # | Contenu |
-|---|---------|
-| V3.1 | Boucle temps réel : chrono continu à la place des vagues, gemmes d'XP (aimant), niveaux d'équipe, or au sol, HUD (chrono, niveau, barre d'XP) |
-| V3.2 | Armes principales visées (bâton de feu, arc, revolver, fusil à pompe, sniper, bâton de foudre, bananarang, épée) à projectiles, sans munitions ; visuels prédits côté client ; choix de l'arme de départ au salon |
-| V3.3 | Armes automatiques (aura, foudre, orbes, haches, mines, tornade, poison, traînée de feu) simulées par le serveur |
-| V3.4 | Montée de niveau : 3 choix (nouvelle arme auto, amélioration d'arme avec 1-2 stats selon la rareté, nouveau tome, tome +1), 5 raretés, 16 tomes, 3 armes auto + 4 tomes max |
-| V3.5 | Monde : coffres = objet aléatoire, prix qui monte à chaque achat ; jarres ; sanctuaires (charge, avidité, défi, aimant) ; bonus au sol (soin, aimant, bombe, rage) |
-| V3.6 | Difficulté continue, élites, boss à 4/8/12 min, Essaim final (fantômes blancs puis noirs, croissance exponentielle) |
-| V3.7 | Méta-progression : silver gagné à chaque partie, boutique au menu (armes principales et armes auto à débloquer), profil sauvegardé |
-| V3.8 | Bots, tests, docs, release, push |
+| # | Contenu | État |
+|---|---------|------|
+| V3.1 | Boucle temps réel : chrono continu à la place des vagues, gemmes d'XP, niveaux d'équipe, HUD (chrono, niveau, barre d'XP) | fait |
+| V3.2 | 8 armes principales visées, à projectiles (explosion, perforation, rebond, boomerang), rayon, chaîne d'éclairs ; sans munitions | fait |
+| V3.3 | 8 armes automatiques (aura, foudre, orbes, haches, mines, tornade, poison, traînée de feu), simulées par le serveur, dessinées par les clients | fait |
+| V3.4 | Montée de niveau : 3 cartes (amélioration d'arme 1-2 stats, nouvelle arme auto, amélioration auto, tome), 5 raretés, 15 tomes, 3 armes auto + 4 tomes max | fait |
+| V3.5 | Coffres au prix qui monte à chaque achat, caisse d'arsenal (niveau gratuit), sanctuaires de charge, power-ups (aimant, soin, bombe, hâte), hordes en meutes | fait |
+| V3.6 | Difficulté continue, élites, boss à 4/8/12 min, Essaim final (fantômes blancs puis noirs, croissance exponentielle) | fait |
+| V3.7 | Méta-progression : argent gagné à chaque partie, arsenal au salon (choix de l'arme de départ, déblocages), sauvegarde dans `settings.txt` | fait |
+| V3.8 | Bots adaptés, tests, docs, release, push | fait |
 
 ## Reste à faire / idées
 
-- Équilibrage fin après des parties à plusieurs (vagues tardives, prix, armes légendaires).
-- Prédiction des roquettes côté client ; sons spatialisés.
+- Équilibrage fin après des parties à plusieurs (armes, cadence des hordes, prix).
+- Projectiles de l'arme principale prédits côté client (aujourd'hui ils viennent du serveur :
+  invisible en local, un léger retard sur Internet).
+- Sanctuaires d'avidité / de défi, jarres cassables, sons spatialisés.
 - Plus de thèmes de chunks (biomes), plus d'affixes d'élites.

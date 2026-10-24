@@ -2,10 +2,11 @@
 
 **FPS roguelike coopératif, de 1 à 4 joueurs**, écrit en Rust avec Bevy 0.20.
 
-Tu cours, tu sautes (double saut, dash, glissade, tremplins) sur une carte procédurale infinie.
-Tu tires sur des vagues de monstres de plus en plus dures. Tu achètes des coffres d'objets et
-d'armes, et tu réanimes tes coéquipiers. Il n'y a aucun fichier d'asset : modèles, terrain et
-sons sont générés par le code.
+Tu cours, tu sautes (double saut, dash, glissade, tremplins) sur une carte procédurale infinie,
+face à des hordes de monstres qui grossissent sans fin, comme dans Megabonk. Différence : ton arme
+principale, **c'est toi qui la vises**. À côté, tes armes automatiques (aura, foudre, orbes…) font
+le reste. Tu montes de niveau, tu choisis tes cartes, tu ouvres des coffres et tu réanimes tes
+coéquipiers. Il n'y a aucun fichier d'asset : modèles, terrain et sons sont générés par le code.
 
 ---
 
@@ -88,15 +89,13 @@ Les touches suivent la **position** physique : ZQSD sur AZERTY, WASD sur QWERTY.
 | Action | Touche |
 |---|---|
 | Se déplacer | **Z Q S D** |
-| Sauter (double saut, plus avec les Plumes) | **Espace** |
+| Sauter (double saut, plus avec les Pattes de grenouille) | **Espace** |
 | Sprinter | **Maj gauche** |
 | Glisser (garde l'élan, accélère en descente) | **Ctrl** ou **C** |
 | Dash | **A** (touche Q en QWERTY) ou bouton latéral de souris |
-| Tirer / Zoomer | **Clic gauche** / **Clic droit** |
-| Recharger | **R** |
-| Ouvrir un coffre / Prendre une arme / Réveiller une statue / Réanimer (maintenir) | **E** |
-| Choisir une carte d'amélioration | **Clic** ou **1 2 3 4** |
-| Changer d'arme (2 emplacements) | **1 / 2** ou **molette** |
+| Tirer (**maintenir** : l'arme tire à sa cadence) / Zoomer | **Clic gauche** / **Clic droit** |
+| Ouvrir un coffre / Réveiller une statue / Réanimer (maintenir) | **E** |
+| Choisir une carte (coffre ou niveau) | **Clic** ou **1 2 3 4** |
 | Pause (sensibilité, volume, FOV) | **Échap** |
 
 **Techniques** :
@@ -108,92 +107,97 @@ Les touches suivent la **position** physique : ZQSD sur AZERTY, WASD sur QWERTY.
 
 ---
 
-## 4. Le jeu (V2)
+## 4. Le jeu (V3, inspirée de Megabonk)
 
-### Vagues
+### Le principe
 
-- La partie est une suite de **vagues**. Une vague se termine quand son **dernier monstre** meurt.
-- Ensuite, une **pause de 12 s** te laisse acheter, puis la vague suivante, plus dure, commence.
-- Les monstres trop loin, ou qui survivent trop longtemps en fin de vague, sont **ramenés près de
-  vous** : pas de chasse interminable. Quand il en reste 3 ou moins, des marqueurs ▼ indiquent où
-  ils sont.
-- **Toutes les 5 vagues : un boss.** Dans l'ordre : Colosse, Reine de la ruche, Titan de foudre,
-  puis on recommence, en plus fort.
-- **Le prix des coffres augmente à chaque vague.**
-- **L'ambiance change avec les vagues** : après-midi doré, coucher de soleil, crépuscule violet,
-  nuit… puis retour au jour.
+Une seule carte infinie, un chrono qui tourne, et des hordes de plus en plus nombreuses.
+Il n'y a **pas de fin** : le but est de **survivre le plus longtemps possible**.
 
-### Argent
+- Les monstres lâchent des **gemmes d'XP** bleues. Passe près d'elles pour les ramasser.
+  L'XP va à **toute l'équipe** : vous montez de niveau ensemble.
+- À chaque **niveau**, chaque joueur choisit **1 carte parmi 3** (pas de pause, le jeu continue).
+- **Boss** à 4:00, 8:00 et 12:00 (Colosse, Reine de la ruche, Titan de foudre). Chaque boss lâche
+  un coffre légendaire.
+- **15:00 : l'Essaim final.** Des **fantômes blancs** traversent tout et foncent sur vous.
+- **20:00 : les fantômes noirs** arrivent. Les fantômes deviennent **plus rapides, plus résistants
+  et plus forts chaque minute**, sans limite : au bout d'un moment, c'est impossible. Combien de
+  temps tiendrez-vous ?
 
-Chaque monstre tué rapporte de l'or **à tous les joueurs** (portefeuilles individuels). Pas de vol
-de kill, et chacun décide de ses achats. Les **élites** (auréole dorée, à partir de la vague 3)
-valent 3 fois plus.
+### Deux catégories d'armes
 
-### Coffres et cartes
+**1. L'arme principale : c'est toi qui vises et qui tires.** Tu la choisis dans le salon avant la
+partie. Pas de munitions : maintiens le clic gauche, elle tire à sa cadence.
+
+| Arme | Style | Prix |
+|---|---|---|
+| Bâton de feu | boules de feu qui explosent | départ |
+| Arc | flèches rapides, gros critiques, traverse 1 ennemi | départ |
+| Épée du héros | vagues tranchantes larges qui traversent tout | départ |
+| Revolver | balles qui **rebondissent** d'ennemi en ennemi | 150 argent |
+| Fusil à pompe | gerbe de plombs | 200 argent |
+| Bananarang | part et **revient** comme un boomerang | 200 argent |
+| Bâton de foudre | l'éclair frappe la cible visée puis **saute** aux voisins | 250 argent |
+| Sniper | rayon instantané qui traverse tout | 300 argent |
+
+Ses améliorations changent ses projectiles : **plus de projectiles**, plus rapides, plus gros,
+plus de rebonds, plus de dégâts, de cadence ou de critiques.
+
+**2. Les armes automatiques (3 maximum) : elles agissent toutes seules.** On les obtient avec les
+cartes de niveau, puis on les améliore.
+
+| Arme | Effet | Prix |
+|---|---|---|
+| Aura | champ de force qui brûle les ennemis autour de toi | départ |
+| Foudre céleste | des éclairs tombent du ciel sur les ennemis | départ |
+| Orbes gardiens | des orbes tournent autour de toi | départ |
+| Haches | haches lancées en cloche, qui traversent | 120 argent |
+| Traînée de feu | des flammes derrière toi quand tu cours | 120 argent |
+| Mines | explosent au passage des ennemis | 150 argent |
+| Fiole de poison | flaques de poison sous les ennemis | 150 argent |
+| Tornade | des tornades errantes broient tout | 180 argent |
+
+### Les cartes de niveau
+
+Chaque carte a une **rareté** (commun, peu commun, rare, épique, légendaire) qui multiplie son
+effet. Une carte peut être :
+- une **amélioration de l'arme principale** (1 stat, 2 à partir de rare) ;
+- une **nouvelle arme automatique** ;
+- une **amélioration d'une arme automatique** ;
+- un **tome** (4 maximum) : un bonus pour **toutes** les armes ou pour toi. Dégâts, cadence,
+  quantité (+1 projectile), taille, vélocité, durée, vitalité, régénération, armure, agilité,
+  chance, expérience, or, attraction (portée de ramassage), précision.
+
+### Argent (or) et coffres
+
+Chaque monstre tué rapporte de l'or **à chaque joueur**. Chacun a son portefeuille, et **le prix
+des coffres monte à chaque coffre que tu ouvres** (et un peu avec le temps).
 
 | Coffre | Faisceau | Contenu |
 |---|---|---|
-| Petit coffre (bois) | — | 3 cartes, surtout communes |
-| Grand coffre (or) | orange | 3 cartes, meilleures raretés |
-| Coffre légendaire (violet) | magenta | 3 cartes épiques ou légendaires (aussi lâché par chaque boss) |
-| Caisse d'arme (acier) | turquoise | une arme posée au sol |
+| Petit coffre (bois) | — | 3 objets au choix, surtout communs |
+| Grand coffre (or) | orange | 3 objets, meilleures raretés |
+| Coffre légendaire (violet) | magenta | 3 objets épiques ou légendaires (lâché par les boss) |
+| Caisse d'arsenal (acier) | turquoise | 3 cartes d'amélioration d'armes (un niveau gratuit) |
 
-Ouvrir un coffre montre **3 cartes d'amélioration** (4 avec la Couronne du roi). Tu en choisis une.
-Le jeu continue pendant ce temps !
+Les **33 objets** (pattes de grenouille, jetpack, canines de vampire, bobine Tesla, couronne du
+roi…) s'ajoutent à tout ça. Ils ont chacun leur icône dessinée par le code.
 
-### 33 améliorations, en 4 catégories et 4 raretés
+### Sanctuaires, power-ups et statues
 
-Raretés : commun, rare, épique, légendaire. Chaque amélioration a son icône dessinée en code.
+- **Sanctuaire de charge** (pilier avec un cercle de pierres turquoise) : reste dans le cercle
+  jusqu'à ce qu'il soit plein. Tous ceux qui sont dedans gagnent un **niveau gratuit**. Plus vous
+  êtes nombreux dedans, plus ça charge vite.
+- **Power-ups** lâchés par les monstres (souvent par les élites) : **Aimant** (toute l'XP de la
+  carte), **Soin** d'équipe, **Bombe** (rase les monstres autour), **Hâte**.
+- **Statues de boss** : appuie sur **E** pour invoquer leur boss tout de suite. C'est risqué, mais
+  le boss lâche un coffre légendaire.
 
-- **Mobilité** :
-  - Pattes de grenouille (+1 saut en l'air) ;
-  - Jetpack (hauteur de saut) ;
-  - Bottes de course ;
-  - Propulseur (+1 dash) ;
-  - Bobine de dash ;
-  - Cire de glisse ;
-  - Cape plume (contrôle en l'air) ;
-  - Pas fantôme (invincible en dash).
-- **Offensif** :
-  - Balles lourdes ;
-  - Gâchette sensible ;
-  - Lunette critique ;
-  - Hache du bourreau (dégâts critiques) ;
-  - Obus instables (explosions) ;
-  - Bobine Tesla (arcs électriques) ;
-  - Pointe creuse ;
-  - Masque du berserker ;
-  - Soif de sang (vitesse après un kill) ;
-  - Âme de gatling.
-- **Défensif** :
-  - Cœur vital ;
-  - Mousse régénérante ;
-  - Plaque d'armure ;
-  - Canines de vampire (vol de vie) ;
-  - Bouclier d'énergie ;
-  - Ronces (renvoi de dégâts) ;
-  - Ankh (te relève une fois) ;
-  - Cœur de dragon.
-- **Utilitaire** :
-  - Pièce fétiche (+or) ;
-  - Chargeur étendu ;
-  - Mains agiles (rechargement) ;
-  - Carte au trésor (coffres moins chers) ;
-  - Trèfle à 4 feuilles (chance) ;
-  - Trousse de soin ;
-  - Couronne du roi (+1 carte).
+### Argent (métal) : la progression entre les parties
 
-### Armes : 2 emplacements
-
-Les caisses d'arme posent l'arme **au sol**. Appuie sur **E** pour la prendre. Si tu as déjà 2 armes,
-celle que tu tiens **tombe au sol** à la place, et un coéquipier peut la récupérer.
-
-| Rareté | Armes |
-|---|---|
-| Commun | Pistolet, Mitraillette, Revolver |
-| Rare | Fusil à pompe, Fusil d'assaut, Fusil à rafale (3 coups) |
-| Épique | Sniper, Lance-grenades (en cloche), Fusil plasma |
-| Légendaire | Lance-roquettes, Minigun (monte en régime), Railgun (traverse tous les ennemis) |
+À la fin de chaque partie, tu gagnes de l'**argent** (selon le temps survécu, tes kills et le niveau
+atteint). Dans le **salon**, clique sur une arme verrouillée pour la **débloquer**. L'argent et les
+déblocages sont enregistrés sur ton PC (`settings.txt`).
 
 ### Monstres
 
@@ -207,28 +211,25 @@ celle que tu tiens **tombe au sol** à la place, et un coéquipier peut la récu
 | Bombeur | Bombe sur pattes qui explose au contact |
 | Chaman | Masque flottant qui **soigne** les autres monstres : à abattre en premier |
 | Brute | Tank qui frappe le sol |
+| **Fantôme blanc / noir** | L'Essaim final : traverse les murs, de plus en plus fort |
 | **Colosse** (boss) | Frappe au sol et salves de projectiles |
 | **Reine de la ruche** (boss) | Vole, invoque des essaims, tire des éventails d'éclairs |
 | **Titan de foudre** (boss) | Ondes de choc au sol (**saute** !) et foudre annoncée par un cercle |
 
-Tous les monstres **télégraphient** leurs attaques. Regarde-les pour esquiver.
-
-### Statues
-
-Des **statues de boss** sont dispersées dans le monde. Appuie sur **E** pour en réveiller une : son
-boss apparaît immédiatement. C'est un pari risqué, mais chaque boss lâche un **coffre légendaire**.
+Les monstres montent de niveau avec le temps, et les **élites** (auréole dorée) arrivent de plus en
+plus souvent. Tous les monstres **télégraphient** leurs attaques : regarde-les pour esquiver.
 
 ### À terre
 
 Un coéquipier te relève en maintenant E près de toi. Si tout le monde est à terre, c'est
-**game over**, avec les statistiques, puis retour au salon.
+**game over** : statistiques, argent gagné, puis retour au salon.
 
 ---
 
 ## 5. Pour les curieux / développeurs
 
 ```bash
-cargo test --lib                     # 79 tests : monde déterministe, mouvement, armes, économie, réseau...
+cargo test --lib                     # 81 tests : monde déterministe, mouvement, armes, économie, réseau...
 cargo clippy --all-targets           # aucun avertissement
 cargo run --release -- server --headless --bots 3 --autostart --duration 120   # partie sans fenêtre
 cargo run --release -- bot                                                     # client bot : rejoint la 1re partie de la liste
@@ -237,7 +238,8 @@ cargo run --release -- solo --autopilot --shots captures                       #
 
 - **Logs** : `target\release\logs\prism_rush.log` (et `prism_rush.prev.log` pour la partie
   précédente). En cas de plantage, la raison est dans `logs\crash.log`.
-- **Réglages** (pseudo, dernière adresse, sensibilité, volume, FOV) : `settings.txt`.
+- **Réglages** (pseudo, dernière adresse, sensibilité, volume, FOV, argent et armes débloquées) :
+  `settings.txt`.
 - **Architecture et choix techniques** : voir [`DECISIONS.md`](DECISIONS.md). Plan des jalons :
   [`PLAN.md`](PLAN.md).
 

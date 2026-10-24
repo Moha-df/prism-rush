@@ -203,3 +203,34 @@ refusé. Version actuelle :
 - **Tests visuels** : en mode `--shots`, une scène de démo (`render/debug.rs`) fait apparaître
   chaque nouveau monstre, une statue, une arme au sol et un choix de cartes, puis prend des
   captures. C'est ce qui a permis de vérifier le rendu sans jouer.
+
+## V3 : la boucle de Megabonk, avec une arme qu'on vise
+
+- **Deux catégories d'armes, deux chemins de code** :
+  - l'**arme principale** fait partie de la simulation partagée (`shared/weapons.rs`) : le client
+    prédit le tir (son, recul, flash, rayon du sniper) exactement comme le serveur ;
+  - les **armes automatiques** n'existent que sur le serveur (`game/autos.rs`). Les clients les
+    *dessinent* à partir du `Gear` répliqué (aura, orbes) ou des entités qu'elles créent
+    (`Hazard` pour les mines, flaques, flammes, tornades ; `Projectile` pour les haches). Aucun
+    message réseau par image pour l'aura ou les orbes : la position des orbes est une fonction du
+    temps (`orb_offset`) que serveur et clients calculent chacun.
+- **`build.rs` est une fonction pure de bout en bout** : `main_params(arme, améliorations, stats)`
+  donne les chiffres finaux de l'arme. Une carte d'amélioration n'est qu'une liste de
+  `(WStat, valeur)` ; la rareté multiplie la valeur (×1 à ×2, comme Megabonk). Les tomes sont
+  stockés en dixièmes de points dans l'`Inventory`, donc `PlayerStats::from_inventory` les inclut
+  sans rien changer ailleurs.
+- **Un seul type de carte pour deux origines** : `PendingChoice { chest: Option<ChestKind>, options:
+  Vec<CardOption> }`. Un coffre propose des objets, un niveau propose des offres ; l'écran de
+  cartes, le bot et le serveur traitent les deux pareil.
+- **Projectiles balayés** : une balle à 95 m/s parcourt 1,6 m par tick. On teste donc le *segment*
+  parcouru pendant le tick contre les capsules des monstres (`ray_capsule`), pas un point : rien
+  ne passe à travers. La perforation garde la liste des monstres déjà touchés ; le rebond crée un
+  nouveau projectile vers le monstre le plus proche (un projectile répliqué une fois ne peut pas
+  changer de trajectoire).
+- **Boomerang sans état** : sa position est `origine + portée × sin(π·t/durée)`. Le client la
+  calcule seul à partir du tick de départ, comme pour les projectiles en cloche.
+- **Méta-progression locale** : l'argent et les déblocages sont dans le `settings.txt` du joueur,
+  pas sur le serveur de l'hôte. Le client annonce son arme et ses armes débloquées (`Hello`, puis
+  `PickLoadout` au salon) ; le serveur ne propose que les armes automatiques de cette liste.
+- **Sanctuaires déterministes** : un emplacement de petit coffre sur 4 (selon son id, donc pareil
+  pour tout le monde) devient un sanctuaire de charge. Pas de nouvelle génération de monde.
