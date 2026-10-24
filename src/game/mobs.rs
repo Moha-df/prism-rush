@@ -232,9 +232,10 @@ fn director(
     tick: Res<SimTick>,
     mut events: MessageWriter<ToClients<GameEvent>>,
     mut gallery: Local<Option<bool>>,
+    config: Res<crate::config::AppConfig>,
 ) {
-    // Debug monster gallery (screenshots): no other monsters.
-    if *gallery.get_or_insert_with(|| std::env::var("PRISM_GALLERY").is_ok()) {
+    // Debug monster gallery and visual studio: no other monsters.
+    if *gallery.get_or_insert_with(|| std::env::var("PRISM_GALLERY").is_ok() || config.studio.is_some()) {
         return;
     }
     let alive: Vec<Vec3> = players.iter().filter(|(_, h)| !h.downed).map(|(s, _)| s.sim.mv.pos).collect();

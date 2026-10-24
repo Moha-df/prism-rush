@@ -44,6 +44,10 @@ pub struct AppConfig {
     pub autopilot: bool,
     /// Debug: runs start at this time (seconds), to test late game.
     pub start_time: f32,
+    /// Visual studio: render this target to a contact sheet, then quit
+    /// (see `render/studio.rs`). Settings are never saved in this mode.
+    pub studio: Option<String>,
+    pub studio_out: Option<String>,
     // --- Progression kept between runs (Megabonk-like meta) ---
     /// Starting main weapon picked in the lobby.
     pub main_weapon: MainWeapon,
@@ -110,6 +114,8 @@ impl Default for AppConfig {
             shots: None,
             autopilot: false,
             start_time: 0.0,
+            studio: None,
+            studio_out: None,
             main_weapon: MainWeapon::FireStaff,
             start_auto: Some(AutoWeapon::Aura),
             unlocked_mains: Vec::new(),
@@ -175,6 +181,9 @@ impl AppConfig {
     }
 
     pub fn save(&self) {
+        if self.studio.is_some() {
+            return;
+        }
         let text = format!(
             "name={}\nlast_address={}\nsensitivity={}\nfov={}\nvolume={}\nsilver={}\nmain_weapon={}\nstart_auto={}\nunlocked_mains={}\nunlocked_autos={}\ndifficulty={}\nmap={}\nmaps_unlocked={}\n",
             self.name,

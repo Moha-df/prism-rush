@@ -6135,6 +6135,7 @@ dependencies = [
  "bevy_replicon_iroh",
  "clap",
  "crossbeam-channel",
+ "image",
  "postcard",
  "rumqttc",
  "serde",

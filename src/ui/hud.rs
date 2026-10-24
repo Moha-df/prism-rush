@@ -134,9 +134,14 @@ fn bar(width: f32, height: f32, fill_color: Color, marker: impl Component) -> im
     )
 }
 
+/// The root node of the in-game HUD (the studio hides it).
+#[derive(Component)]
+pub struct HudRoot;
+
 fn spawn_hud(mut commands: Commands) {
     let root = commands
         .spawn((
+            HudRoot,
             DespawnOnExit(AppState::InGame),
             Node { width: Val::Percent(100.0), height: Val::Percent(100.0), ..default() },
         ))

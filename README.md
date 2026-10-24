@@ -298,6 +298,11 @@ cargo run --release -- --map 2 --difficulty 4 solo                             #
 cargo run --release -- --start-time 900 solo                                   # commencer à 15:00 (tester l'essaim)
 ```
 
+**Améliorer les visuels** : le **studio visuel** (`bash scripts/studio.sh mob:skitter`) affiche un seul
+modèle, effet ou écran et enregistre une planche d'images ; des sous-agents Claude
+(`visual-polisher`) s'en servent pour améliorer chaque élément séparément. Voir
+[`OUTIL_VISUEL.md`](OUTIL_VISUEL.md).
+
 - **Logs** : `target\release\logs\prism_rush.log` (et `prism_rush.prev.log` pour la partie
   précédente). En cas de plantage, la raison est dans `logs\crash.log`.
 - **Réglages** (pseudo, dernière adresse, sensibilité, volume, FOV, argent, armes et cartes

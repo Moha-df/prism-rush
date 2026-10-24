@@ -116,7 +116,7 @@ pub fn pose(tag: AnimTag, rest: &Transform, st: &AnimState, t: f32) -> Transform
     out
 }
 
-fn animate_parts(time: Res<Time>, states: Query<&AnimState>, mut parts: Query<(&AnimPart, &mut Transform)>) {
+pub fn animate_parts(time: Res<Time>, states: Query<&AnimState>, mut parts: Query<(&AnimPart, &mut Transform)>) {
     let t = time.elapsed_secs();
     for (part, mut transform) in &mut parts {
         let Ok(st) = states.get(part.root) else { continue };

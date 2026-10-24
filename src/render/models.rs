@@ -75,6 +75,17 @@ pub fn player(color: Color) -> Part {
 // Monsters
 // ---------------------------------------------------------------------------
 
+/// A monster model, with the elite look (bigger, golden ring and crown).
+pub fn mob_with_elite(kind: MobKind, elite: bool) -> Part {
+    if !elite {
+        return mob(kind);
+    }
+    let def = kind.def();
+    scale_part(mob(kind), 1.3)
+        .with(Part::torus(def.radius * 3.0, 0.1).at(0.0, 0.15, 0.0).color(GOLD).glow(4.0).tag(AnimTag::Pulse))
+        .with(Part::cone(0.3, 0.35).at(0.0, def.height * 1.3 + 0.3, 0.0).color(GOLD).glow(2.0).tag(AnimTag::Bob))
+}
+
 pub fn mob(kind: MobKind) -> Part {
     match kind {
         MobKind::Skitter => skitter(),

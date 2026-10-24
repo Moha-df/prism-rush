@@ -8,6 +8,8 @@ bevy = { version = "0.20", features = ["serialize", "system_clipboard", "system_
 bevy_replicon = "0.45"
 bevy_replicon_iroh = "0.20"
 clap = { version = "4.6.7", features = ["derive"] }
+# Same version as Bevy's: tiles screenshots into contact sheets (visual studio).
+image = { version = "0.25.10", default-features = false, features = ["png"] }
 crossbeam-channel = "0.5"
 rumqttc = { version = "0.25", default-features = false }
 serde = { version = "1.0.229", features = ["derive"] }

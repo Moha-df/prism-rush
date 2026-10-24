@@ -13,6 +13,7 @@ pub mod model;
 pub mod models;
 pub mod monsters;
 pub mod palette;
+pub mod studio;
 pub mod terrain;
 pub mod viewmodel;
 
@@ -58,6 +59,7 @@ impl Plugin for RenderPlugin {
                 icons::IconsPlugin,
                 atmosphere::AtmospherePlugin,
                 autos::AutoVisualsPlugin,
+                studio::StudioPlugin,
             ));
     }
 }

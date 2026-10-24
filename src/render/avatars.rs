@@ -222,14 +222,8 @@ fn attach_models(
     let mut burrowers = Vec::new();
     for (e, m) in &mobs {
         let def = m.kind.def();
-        let model = if m.elite {
-            // Elites: bigger, with a golden aura ring and a little crown.
-            models::scale_part(models::mob(m.kind), 1.3)
-                .with(Part::torus(def.radius * 3.0, 0.1).at(0.0, 0.15, 0.0).color(palette::GOLD).glow(4.0).tag(AnimTag::Pulse))
-                .with(Part::cone(0.3, 0.35).at(0.0, def.height * 1.3 + 0.3, 0.0).color(palette::GOLD).glow(2.0).tag(AnimTag::Bob))
-        } else {
-            models::mob(m.kind)
-        };
+        // Elites: bigger, with a golden aura ring and a little crown.
+        let model = models::mob_with_elite(m.kind, m.elite);
         attach(&mut commands, e, model, (def.height * 0.6).max(0.8));
         if matches!(m.kind, MobKind::Burrower | MobKind::Sandworm) {
             burrowers.push((e, def.radius, def.height));

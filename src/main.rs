@@ -60,6 +60,15 @@ enum Command {
     },
     /// Joins a game by its code (shown in the host's lobby).
     Join { code: String },
+    /// Visual studio: renders one model / animation / effect / UI screen
+    /// into a contact sheet PNG, then quits. `studio list` lists the targets.
+    Studio {
+        /// What to render (e.g. mob:skitter, model:chest:large, fx:explosion, ui:cards).
+        target: String,
+        /// Output PNG (default: studio_out/<target>.png).
+        #[arg(long)]
+        out: Option<String>,
+    },
     /// Solo game (host without waiting in the lobby).
     Solo {
         #[arg(long, default_value_t = 0)]
@@ -177,6 +186,28 @@ fn main() {
             config.solo = true;
             LaunchMode::Host
         }
+        Command::Studio { target, out } => {
+            if target == "list" {
+                for (t, src) in prism_rush::render::studio::catalog() {
+                    println!("{t:<34} {src}");
+                }
+                return;
+            }
+            config.volume = 0.0;
+            config.solo = true;
+            config.bots = 0;
+            config.studio_out = out;
+            let launch = match target.as_str() {
+                "ui:menu" => LaunchMode::Menu,
+                "ui:lobby" => LaunchMode::Host,
+                _ => {
+                    config.autostart = true;
+                    LaunchMode::Host
+                }
+            };
+            config.studio = Some(target);
+            launch
+        }
         Command::Server { headless, bots, autostart, seed } => {
             config.headless = headless;
             config.bots = bots;
@@ -208,18 +239,24 @@ fn main() {
             TransformPlugin,
         ));
     } else {
-        app.add_plugins(DefaultPlugins.set(LogPlugin { custom_layer: file_log_layer, ..default() }).set(WindowPlugin {
+        // The studio prints only its result (agents read the output).
+        let log = if config.studio.is_some() {
+            LogPlugin { custom_layer: file_log_layer, filter: "error".into(), ..default() }
+        } else {
+            LogPlugin { custom_layer: file_log_layer, ..default() }
+        };
+        app.add_plugins(DefaultPlugins.set(log).set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Prism Rush".into(),
                 resolution: WindowResolution::new(1600, 900),
                 present_mode: PresentMode::AutoVsync,
                 // Automated visual tests must not steal the keyboard/mouse.
-                window_level: if config.shots.is_some() || config.autopilot {
+                window_level: if config.shots.is_some() || config.autopilot || config.studio.is_some() {
                     WindowLevel::AlwaysOnBottom
                 } else {
                     WindowLevel::Normal
                 },
-                focused: config.shots.is_none() && !config.autopilot,
+                focused: config.shots.is_none() && !config.autopilot && config.studio.is_none(),
                 ..default()
             }),
             ..default()

@@ -5,3 +5,6 @@ settings.txt
 /shots*
 crash.log
 logs/
+
+# Visual studio output (prism_rush studio ...)
+studio_out/
