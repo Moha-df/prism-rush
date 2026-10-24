@@ -19,6 +19,8 @@ use crate::shared::weapons::magazine_size;
 #[derive(Component)]
 struct HpFill;
 #[derive(Component)]
+struct XpFill;
+#[derive(Component)]
 struct HpText;
 #[derive(Component)]
 struct GoldText;
@@ -98,6 +100,7 @@ impl Plugin for HudPlugin {
                     pause_actions,
                     wave_banner,
                     enemy_markers,
+                    update_xp_bar,
                 )
                     .run_if(in_state(AppState::InGame)),
             );
@@ -138,6 +141,14 @@ fn spawn_hud(mut commands: Commands) {
         ))
         .id();
     let child = |commands: &mut Commands, bundle: (Node,)| commands.spawn((bundle, ChildOf(root))).id();
+
+    // Team XP bar along the top edge.
+    commands.spawn((
+        Node { position_type: PositionType::Absolute, top: Val::Px(0.0), left: Val::Px(0.0), width: Val::Percent(100.0), height: Val::Px(8.0), ..default() },
+        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.5)),
+        ChildOf(root),
+        children![(XpFill, Node { width: Val::Percent(0.0), height: Val::Percent(100.0), ..default() }, BackgroundColor(Color::srgb(0.35, 0.8, 1.0)))],
+    ));
 
     // Hurt vignette (full screen, transparent red border).
     commands.spawn((
@@ -360,31 +371,31 @@ fn update_vitals(
     }
     if let (Ok(m), Ok(mut t)) = (info.single(), run.single_mut()) {
         let secs = m.elapsed as u32;
+        let swarm = match m.swarm {
+            0 if m.elapsed < economy::FINAL_SWARM_TIME => {
+                let left = (economy::FINAL_SWARM_TIME - m.elapsed) as u32;
+                format!("Essaim final dans {:02}:{:02}", left / 60, left % 60)
+            }
+            1 => "ESSAIM FINAL — fantômes blancs".to_string(),
+            _ => "ESSAIM FINAL — fantômes noirs".to_string(),
+        };
         set_text(&mut t, format!(
-            "VAGUE {}   ·   {}   ·   {:02}:{:02}\nCoffres : petit {} · grand {} · arme {} or",
-            m.wave.max(1),
-            wave_status(m),
+            "{:02}:{:02}   ·   Niveau {}   ·   Monstres niv. {}   ·   {} en vie\n{}",
             secs / 60,
             secs % 60,
-            economy::chest_price(economy::ChestKind::Small, m.wave),
-            economy::chest_price(economy::ChestKind::Large, m.wave),
-            economy::chest_price(economy::ChestKind::Weapon, m.wave)
+            m.team_level,
+            m.level,
+            m.enemies_left,
+            swarm
         ));
     }
 }
 
-/// Short text describing the wave progress.
-fn wave_status(m: &MatchInfo) -> String {
-    match m.wave_phase {
-        WavePhase::Break if m.wave == 0 => format!("début dans {:.0} s", m.wave_timer.max(0.0).ceil()),
-        WavePhase::Break => format!("pause : vague suivante dans {:.0} s", m.wave_timer.max(0.0).ceil()),
-        WavePhase::Fighting if m.wave_spawning => format!("{} ennemis (d'autres arrivent)", m.enemies_left),
-        WavePhase::Fighting => format!("{} ennemi{} restant{}", m.enemies_left, plural(m.enemies_left), plural(m.enemies_left)),
+/// The team XP bar at the very top of the screen.
+fn update_xp_bar(info: Query<&MatchInfo>, mut fill: Query<&mut Node, With<XpFill>>) {
+    if let (Ok(m), Ok(mut node)) = (info.single(), fill.single_mut()) {
+        node.width = Val::Percent((m.xp / m.xp_next.max(1.0)).clamp(0.0, 1.0) * 100.0);
     }
-}
-
-fn plural(n: u16) -> &'static str {
-    if n > 1 { "s" } else { "" }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -556,14 +567,14 @@ fn update_prompt(
             .filter(|(c, o)| !o.opened && c.pos.distance(pos + Vec3::Y * 0.5) < INTERACT_RANGE)
             .min_by(|a, b| a.0.pos.distance(pos).total_cmp(&b.0.pos.distance(pos)))
         {
-            let wave = info.single().map(|m| m.wave).unwrap_or(1);
+            let elapsed = info.single().map(|m| m.elapsed).unwrap_or(0.0);
             let (items, choosing) = pending
                 .iter()
                 .find(|(p, ..)| p.slot == me.slot)
                 .map(|(_, i, c)| (i.0, c))
                 .unwrap_or_default();
             let stats = PlayerStats::from_inventory(&items);
-            let price = crate::game::chests::player_price(chest.kind, wave, &stats);
+            let price = crate::game::chests::player_price(chest.kind, wallet.chests_opened, elapsed, &stats);
             let what = chest.kind.name();
             text = if choosing {
                 "Choisis d'abord ta carte !".to_string()
@@ -674,14 +685,11 @@ fn toasts_from_events(
             GameEvent::Revived { slot } => (format!("{} est de retour !", name(*slot)), Color::srgb(0.4, 1.0, 0.6)),
             GameEvent::BossSpawned => ("Un BOSS approche !".to_string(), crate::render::palette::GLOW_ORANGE),
             GameEvent::StatueAwakened { .. } => ("Une statue s'éveille… un boss arrive !".to_string(), crate::render::palette::GLOW_MAGENTA),
-            GameEvent::BossKilled => ("Le Colosse est tombé !".to_string(), crate::render::palette::GOLD),
-            GameEvent::WaveStarted { wave, boss } => (
-                if *boss { format!("Vague {wave} — un BOSS approche !") } else { format!("Vague {wave} !") },
-                crate::render::palette::GLOW_ORANGE,
-            ),
-            GameEvent::WaveCleared { wave } => (
-                format!("Vague {wave} terminée ! Pause de {:.0} s pour acheter", economy::WAVE_BREAK),
-                Color::srgb(0.4, 1.0, 0.6),
+            GameEvent::BossKilled => ("Le boss est tombé ! Un coffre légendaire l'attend".to_string(), crate::render::palette::GOLD),
+            GameEvent::LevelUp { level } => (format!("Niveau {level} !"), Color::srgb(0.4, 1.0, 0.6)),
+            GameEvent::SwarmStarted { black } => (
+                if *black { "Les fantômes NOIRS arrivent…".to_string() } else { "ESSAIM FINAL : les fantômes arrivent !".to_string() },
+                crate::render::palette::GLOW_MAGENTA,
             ),
             GameEvent::GameOver(_) => continue,
         };
@@ -707,15 +715,15 @@ fn wave_banner(
     let Ok((mut b, mut text, mut color, mut shadow, mut vis)) = banner.single_mut() else { return };
     for ev in events.read() {
         match ev {
-            GameEvent::WaveStarted { wave, boss } => {
-                text.0 = if *boss { format!("VAGUE {wave}\nBOSS") } else { format!("VAGUE {wave}") };
-                color.0 = if *boss { crate::render::palette::GLOW_MAGENTA } else { ACCENT };
+            GameEvent::BossSpawned => {
+                text.0 = "BOSS".to_string();
+                color.0 = crate::render::palette::GLOW_ORANGE;
                 b.0 = 2.5;
             }
-            GameEvent::WaveCleared { wave } => {
-                text.0 = format!("VAGUE {wave} TERMINÉE");
-                color.0 = Color::srgb(0.4, 1.0, 0.6);
-                b.0 = 2.5;
+            GameEvent::SwarmStarted { black } => {
+                text.0 = if *black { "FANTÔMES NOIRS".to_string() } else { "ESSAIM FINAL".to_string() };
+                color.0 = crate::render::palette::GLOW_MAGENTA;
+                b.0 = 3.0;
             }
             _ => {}
         }
@@ -731,7 +739,7 @@ fn wave_banner(
     }
 }
 
-/// When only a few monsters are left, show where they are (even through walls).
+/// Bosses are always marked on screen (even through walls).
 fn enemy_markers(
     mut commands: Commands,
     info: Query<&MatchInfo>,
@@ -739,11 +747,11 @@ fn enemy_markers(
     camera: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
     mut markers: Query<(Entity, &EnemyMarker, &mut Node, &mut Visibility, &mut Text)>,
 ) {
-    let show = info.single().is_ok_and(|m| m.wave_phase == WavePhase::Fighting && !m.wave_spawning && m.enemies_left <= 3);
+    let show = info.single().is_ok();
     let Ok((camera, cam_t)) = camera.single() else { return };
-    // Spawn a marker per monster when needed.
+    // Spawn a marker per boss when needed.
     if show {
-        for (e, _, _) in &mobs {
+        for (e, _, _) in mobs.iter().filter(|(_, _, m)| m.kind.is_boss()) {
             if !markers.iter().any(|(_, m, ..)| m.0 == e) {
                 commands.spawn((
                     DespawnOnExit(AppState::InGame),
@@ -830,13 +838,13 @@ fn spawn_world_labels(
             Visibility::Hidden,
         ));
     }
-    let wave = info.single().map(|m| m.wave).unwrap_or(1);
+    let _ = &info;
     for (e, c) in &chests {
         let color = chest_color(c.kind);
         commands.spawn((
             DespawnOnExit(AppState::InGame),
             WorldLabel { target: e, height: 1.4, max_distance: 25.0 },
-            Text::new(format!("{}", economy::chest_price(c.kind, wave))),
+            Text::new(c.kind.name()),
             bold(16.0),
             TextColor(color),
             TextShadow::default(),
@@ -852,10 +860,18 @@ fn place_world_labels(
     camera: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
     targets: Query<(&GlobalTransform, Option<&Chest>, Option<&ChestOpen>)>,
     info: Query<&MatchInfo>,
+    local: Res<LocalPlayer>,
+    me: Query<(&Player, &Wallet, &Items)>,
     mut labels: Query<(Entity, &WorldLabel, &mut Node, &mut Visibility, &mut Text, &ComputedNode)>,
 ) {
     let Ok((camera, cam_t)) = camera.single() else { return };
-    let wave = info.single().map(|m| m.wave).unwrap_or(1);
+    let elapsed = info.single().map(|m| m.elapsed).unwrap_or(0.0);
+    // Prices are personal: they grow with every chest *you* opened.
+    let (opened, stats) = me
+        .iter()
+        .find(|(p, ..)| Some(p.slot) == local.slot)
+        .map(|(_, w, i)| (w.chests_opened, PlayerStats::from_inventory(&i.0)))
+        .unwrap_or_else(|| (0, PlayerStats::from_inventory(&Default::default())));
     for (e, label, mut node, mut vis, mut text, computed) in &mut labels {
         let Ok((target, chest, open)) = targets.get(label.target) else {
             commands.entity(e).try_despawn();
@@ -872,7 +888,7 @@ fn place_world_labels(
             continue;
         }
         if let Some(c) = chest {
-            let s = format!("{} or", economy::chest_price(c.kind, wave));
+            let s = format!("{} or", crate::game::chests::player_price(c.kind, opened, elapsed, &stats));
             if text.0 != s {
                 text.0 = s;
             }

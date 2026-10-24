@@ -195,7 +195,9 @@ fn update_atmosphere(
     sky: Query<&MeshMaterial3d<StandardMaterial>, (With<SkyDome>, Without<SunDisc>)>,
     camera: Query<&GlobalTransform, With<MainCamera>>,
 ) {
-    let target = info.single().map(|m| m.wave.max(1) as f32).unwrap_or(1.0);
+    // One "wave" of mood per minute: afternoon, sunset ~4 min, dusk ~8 min,
+    // night ~12 min (just before the Final Swarm), then around again.
+    let target = info.single().map(|m| 1.0 + m.elapsed / 60.0).unwrap_or(1.0);
     // Glide toward the target wave: the mood changes over a few seconds.
     let k = 1.0 - (-time.delta_secs() * 0.4).exp();
     state.wave += (target - state.wave) * k;

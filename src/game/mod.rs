@@ -12,6 +12,7 @@ pub mod combat;
 pub mod lobby;
 pub mod mobs;
 pub mod players;
+pub mod progress;
 pub mod world;
 
 use bevy::prelude::*;
@@ -64,6 +65,7 @@ impl Plugin for GamePlugin {
                 combat::CombatPlugin,
                 mobs::MobsPlugin,
                 chests::ChestsPlugin,
+                progress::ProgressPlugin,
             ));
     }
 }

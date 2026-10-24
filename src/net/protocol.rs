@@ -30,15 +30,6 @@ pub enum Phase {
     GameOver,
 }
 
-/// Where we are within the current wave.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum WavePhase {
-    /// Monsters are coming / alive.
-    Fighting,
-    /// Short pause between waves.
-    Break,
-}
-
 /// Global state of the match, on a single replicated entity.
 #[derive(Component, Clone, Debug, Serialize, Deserialize)]
 pub struct MatchInfo {
@@ -51,15 +42,14 @@ pub struct MatchInfo {
     /// Server simulation tick (60 Hz), used by clients to sync their clock.
     pub tick: u32,
     pub boss_alive: bool,
-    /// Current wave number (1-based).
-    pub wave: u32,
-    pub wave_phase: WavePhase,
-    /// Break: seconds before the next wave.
-    pub wave_timer: f32,
+    /// Team level (everyone levels up together) and XP progress.
+    pub team_level: u32,
+    pub xp: f32,
+    pub xp_next: f32,
+    /// Final Swarm: 0 = not yet, 1 = white ghosts, 2 = black ghosts too.
+    pub swarm: u8,
     /// Monsters alive right now.
     pub enemies_left: u16,
-    /// More monsters of this wave are still to come.
-    pub wave_spawning: bool,
 }
 
 /// Identity of a player: slot (0..4, also picks the color) and name.
@@ -110,6 +100,16 @@ pub struct PendingChoice {
 #[derive(Component, Clone, Copy, Debug, Default, Serialize, Deserialize)]
 pub struct Wallet {
     pub gold: u32,
+    /// Chests this player opened: each one makes the next more expensive.
+    pub chests_opened: u32,
+}
+
+/// An XP gem dropped by a monster. Walk near it to collect it (the whole
+/// team gains the XP).
+#[derive(Component, Clone, Copy, Debug, Serialize, Deserialize)]
+pub struct XpGem {
+    pub pos: Vec3,
+    pub value: f32,
 }
 
 #[derive(Component, Clone, Copy, Debug, Default, Serialize, Deserialize)]
@@ -284,6 +284,8 @@ pub enum Fx {
     MobAttack { pos: Vec3, kind: MobKind },
     PlayerHurt { slot: u8, amount: u16 },
     Gold { amount: u32 },
+    /// XP gems collected by a player (visual: gems fly to them).
+    XpCollected { from: Vec3, slot: u8 },
     /// A straggler monster was brought back near the players.
     Warp { from: Vec3, to: Vec3 },
     /// Electric arc between two points (Tesla coil).
@@ -307,8 +309,10 @@ pub enum GameEvent {
     BossSpawned,
     StatueAwakened { pos: Vec3 },
     BossKilled,
-    WaveStarted { wave: u32, boss: bool },
-    WaveCleared { wave: u32 },
+    /// The team reached a new level.
+    LevelUp { level: u32 },
+    /// The Final Swarm begins (white ghosts), or black ghosts join.
+    SwarmStarted { black: bool },
     GameOver(Box<RunSummary>),
 }
 
@@ -348,6 +352,7 @@ pub fn register_protocol(app: &mut App) {
         .replicate::<ChestOpen>()
         .replicate_once::<Projectile>()
         .replicate_once::<WeaponPickup>()
+        .replicate_once::<XpGem>()
         .replicate_once::<Hazard>()
         .replicate_once::<Statue>()
         .replicate::<StatueUsed>()

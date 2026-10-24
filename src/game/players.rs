@@ -160,9 +160,12 @@ fn simulate_players(
 
 fn regenerate(
     mut players: Query<(&mut Health, &Items, &mut HurtClock)>,
-    mut director: ResMut<super::mobs::Director>,
+    info: Single<&MatchInfo>,
+    mut last_level: Local<u32>,
 ) {
-    let wave_cleared = std::mem::take(&mut director.just_cleared);
+    // Medkit heals at every team level-up.
+    let wave_cleared = info.team_level > *last_level && *last_level > 0;
+    *last_level = info.team_level;
     for (mut health, items, mut clock) in &mut players {
         let stats = PlayerStats::from_inventory(&items.0);
         clock.0 += DT;

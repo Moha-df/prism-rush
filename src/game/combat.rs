@@ -490,9 +490,11 @@ fn apply_mob_damage(
     mut players: Query<(&Player, &mut Health, &mut Wallet, &Items, &mut PlayerScore, &mut PlayerState), Without<Mob>>,
     mut info: Single<&mut MatchInfo>,
     tick: Res<SimTick>,
+    gems: Query<(), With<XpGem>>,
     mut fx: MessageWriter<ToClients<Fx>>,
     mut events: MessageWriter<ToClients<GameEvent>>,
 ) {
+    let gem_count = gems.iter().count();
     for hit in hits.read() {
         let Ok((mob, mut health, mob_state)) = mobs.get_mut(hit.target) else { continue };
         if health.hp <= 0.0 {
@@ -535,6 +537,9 @@ fn apply_mob_damage(
                 wallet.gold += gold;
                 score.gold_earned += gold;
             }
+            // XP gem for the team (elites and bosses are worth more).
+            let xp = mob.kind.def().gold * if mob.elite { 3.0 } else { 1.0 } * if mob.kind.is_boss() { 5.0 } else { 1.0 };
+            crate::game::progress::drop_gem(&mut commands, gem_count, mob_state.pos, xp, &mut info);
             // A jelly splits into two small ones.
             if mob.kind == MobKind::Jelly {
                 for side in [-1.0f32, 1.0] {

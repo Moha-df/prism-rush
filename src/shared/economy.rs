@@ -113,6 +113,73 @@ pub fn spawn_interval(wave: u32) -> f32 {
     (3.0 - 0.12 * wave as f32).max(0.9)
 }
 
+// ---------------------------------------------------------------------------
+// V3: continuous time (Megabonk-like). No waves, no end: it gets harder until
+// it is impossible.
+// ---------------------------------------------------------------------------
+
+/// The Final Swarm starts: white ghosts join the fight.
+pub const FINAL_SWARM_TIME: f32 = 15.0 * 60.0;
+/// Black ghosts (faster, tougher) join too.
+pub const BLACK_GHOSTS_TIME: f32 = 20.0 * 60.0;
+/// Bosses arrive at these times (seconds).
+pub const BOSS_TIMES: [f32; 3] = [4.0 * 60.0, 8.0 * 60.0, 12.0 * 60.0];
+
+/// Difficulty coefficient: grows with time, faster with more players.
+pub fn time_difficulty(elapsed: f32, players: u32) -> f32 {
+    let minutes = elapsed / 60.0;
+    let player_factor = 1.0 + 0.15 * (players.max(1) - 1) as f32;
+    1.0 + minutes * 0.2 * player_factor
+}
+
+/// Monster level (drives HP and damage): +1 every 45 seconds.
+pub fn time_monster_level(elapsed: f32) -> u32 {
+    1 + (elapsed / 45.0) as u32
+}
+
+/// Spawn budget gained per second.
+pub fn spawn_rate(elapsed: f32, players: u32) -> f32 {
+    (0.3 + 0.22 * players.max(1) as f32) * (1.0 + elapsed / 60.0 * 0.5)
+}
+
+/// Max monsters alive at once (performance and network cap).
+pub fn max_alive_time(elapsed: f32, players: u32) -> usize {
+    let n = 8.0 + 4.0 * players.max(1) as f32 + elapsed / 60.0 * 6.0;
+    (n as usize).min(140)
+}
+
+/// Strength multiplier of the Final Swarm ghosts: +12% per minute, forever.
+/// (Exponential: after a while nothing can survive. That is the point.)
+pub fn swarm_mult(elapsed: f32) -> f32 {
+    let minutes = ((elapsed - FINAL_SWARM_TIME) / 60.0).max(0.0);
+    1.12f32.powf(minutes)
+}
+
+/// Ghosts spawned per second during the Final Swarm.
+pub fn ghost_rate(elapsed: f32, players: u32) -> f32 {
+    if elapsed < FINAL_SWARM_TIME {
+        return 0.0;
+    }
+    (1.0 + 0.4 * players.max(1) as f32) * swarm_mult(elapsed).sqrt()
+}
+
+/// XP needed to go from `level` to `level + 1` (team level).
+pub fn xp_to_next(level: u32) -> f32 {
+    let l = level.max(1) as f32;
+    8.0 + 6.0 * l + 0.6 * l * l
+}
+
+/// Chest price for a player: +14% per chest this player already opened,
+/// and a little more as time passes.
+pub fn chest_price_v3(kind: ChestKind, opened_by_player: u32, elapsed: f32) -> u32 {
+    let base = match kind {
+        ChestKind::Small | ChestKind::Weapon => 20.0,
+        ChestKind::Large => 45.0,
+        ChestKind::Legendary => 120.0,
+    };
+    (base * 1.14f32.powi(opened_by_player as i32) * (1.0 + elapsed / 60.0 * 0.06)).round() as u32
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,6 +227,20 @@ mod tests {
     fn budgets_grow() {
         assert!(wave_budget(2, 1) > wave_budget(1, 1));
         assert!(wave_budget(1, 4) > wave_budget(1, 1));
+    }
+
+    #[test]
+    fn time_progression_v3() {
+        assert_eq!(time_difficulty(0.0, 1), 1.0);
+        assert!(time_difficulty(600.0, 1) > time_difficulty(60.0, 1));
+        assert_eq!(swarm_mult(0.0), 1.0);
+        assert_eq!(ghost_rate(FINAL_SWARM_TIME - 1.0, 2), 0.0);
+        assert!(ghost_rate(FINAL_SWARM_TIME + 600.0, 2) > ghost_rate(FINAL_SWARM_TIME + 60.0, 2));
+        // 30 minutes in, ghosts are several times stronger: near impossible.
+        assert!(swarm_mult(30.0 * 60.0) > 5.0);
+        assert!(xp_to_next(10) > xp_to_next(2));
+        assert!(chest_price_v3(ChestKind::Small, 5, 0.0) > chest_price_v3(ChestKind::Small, 0, 0.0));
+        assert!(max_alive_time(1e6, 4) <= 140);
     }
 
     #[test]

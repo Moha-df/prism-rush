@@ -37,6 +37,9 @@ struct Cli {
     /// Quit after this many seconds (automated tests).
     #[arg(long, global = true)]
     duration: Option<f32>,
+    /// Debug: start runs at this time in seconds (e.g. 900 = Final Swarm).
+    #[arg(long, global = true, default_value_t = 0.0)]
+    start_time: f32,
 }
 
 #[derive(Subcommand, Debug)]
@@ -144,6 +147,7 @@ fn main() {
     config.shots = cli.shots;
     config.autopilot = cli.autopilot;
     config.duration = cli.duration;
+    config.start_time = cli.start_time;
 
     config.launch = match cli.command.unwrap_or(Command::Menu) {
         Command::Menu => LaunchMode::Menu,

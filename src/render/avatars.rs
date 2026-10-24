@@ -133,6 +133,7 @@ fn attach_models(
     pickups: Query<(Entity, &WeaponPickup), NeedsModel>,
     statues: Query<(Entity, &Statue), NeedsModel>,
     hazards: Query<(Entity, &Hazard), NeedsModel>,
+    gems: Query<(Entity, &XpGem), NeedsModel>,
 ) {
     let mut attach = |commands: &mut Commands, entity: Entity, part: super::model::Part, stride: f32| {
         let model = spawn_child_model(commands, &mut cache, &mut meshes, &mut materials, entity, &part);
@@ -155,6 +156,9 @@ fn attach_models(
     }
     for (e, s) in &statues {
         attach(&mut commands, e, models::statue(s.boss), 1.0);
+    }
+    for (e, g) in &gems {
+        attach(&mut commands, e, models::xp_gem(g.value), 1.0);
     }
     for (e, h) in &hazards {
         let part = match h.kind {
@@ -195,7 +199,11 @@ fn place_chests(
     pickups: Query<(Entity, &WeaponPickup), Without<Transform>>,
     statues: Query<(Entity, &Statue), Without<Transform>>,
     hazards: Query<(Entity, &Hazard), Without<Transform>>,
+    gems: Query<(Entity, &XpGem), Without<Transform>>,
 ) {
+    for (e, g) in &gems {
+        commands.entity(e).try_insert((Transform::from_translation(g.pos), Visibility::default()));
+    }
     for (e, s) in &statues {
         commands.entity(e).try_insert((Transform::from_translation(s.pos), Visibility::default()));
     }

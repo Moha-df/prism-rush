@@ -51,7 +51,8 @@ pub struct BotView<'a> {
     pub me: &'a PlayerSim,
     pub downed: bool,
     pub gold: u32,
-    pub wave: u32,
+    pub elapsed: f32,
+    pub chests_opened: u32,
     /// (center position) of monsters.
     pub mobs: &'a [Vec3],
     /// Unopened chests.
@@ -114,7 +115,7 @@ pub fn think(brain: &mut BotBrain, view: &BotView) -> BotOutput {
         &mut view
             .chests
             .iter()
-            .filter(|(p, k)| p.distance(me) < 50.0 && reachable(p) && view.gold >= economy::chest_price(*k, view.wave))
+            .filter(|(p, k)| p.distance(me) < 50.0 && reachable(p) && view.gold >= economy::chest_price_v3(*k, view.chests_opened, view.elapsed))
             .map(|(p, _)| *p),
     );
     // 3. Fight.
@@ -316,7 +317,8 @@ fn server_bots(
             me: &state.sim,
             downed: health.downed,
             gold: wallet.gold,
-            wave: info.wave,
+            elapsed: info.elapsed,
+            chests_opened: wallet.chests_opened,
             mobs: &world.mobs,
             chests: &world.chests,
             downed_allies: &world.downed,
@@ -357,7 +359,8 @@ fn bot_client_input(
         me: &pred.sim,
         downed: health.downed,
         gold: wallet.gold,
-        wave: info.wave,
+        elapsed: info.elapsed,
+        chests_opened: wallet.chests_opened,
         mobs: &world.mobs,
         chests: &world.chests,
         downed_allies: &world.downed,
@@ -397,10 +400,12 @@ fn log_server_summary(
         })
         .collect();
     info!(
-        "[run] t={:.0}s wave {} ({:?}) diff {:.2} mobs {} chests opened {} spawned {} | {}",
+        "[run] t={:.0}s lvl {} xp {:.0}/{:.0} swarm {} diff {:.2} mobs {} chests opened {} spawned {} | {}",
         info.elapsed,
-        info.wave,
-        info.wave_phase,
+        info.team_level,
+        info.xp,
+        info.xp_next,
+        info.swarm,
         info.difficulty,
         mobs.iter().count(),
         chests.opened.len(),
@@ -467,7 +472,7 @@ mod tests {
     use super::*;
 
     fn view<'a>(me: &'a PlayerSim, mobs: &'a [Vec3], chests: &'a [(Vec3, ChestKind)]) -> BotView<'a> {
-        BotView { me, downed: false, gold: 1000, wave: 1, mobs, chests, downed_allies: &[], pickups: &[] }
+        BotView { me, downed: false, gold: 1000, elapsed: 0.0, chests_opened: 0, mobs, chests, downed_allies: &[], pickups: &[] }
     }
 
     #[test]

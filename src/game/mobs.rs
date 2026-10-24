@@ -17,24 +17,23 @@ use crate::shared::mobs::MobKind;
 use crate::shared::movement::{move_body, DT, GRAVITY, PLAYER_HEIGHT};
 use crate::shared::rng::Rng;
 
-/// Wave state that only the server needs.
+/// Spawn state that only the server needs.
 #[derive(Resource)]
 pub struct Director {
-    /// Spawn budget left for the current wave.
-    pub budget: f32,
+    /// Spawn budget available.
+    pub credits: f32,
     pub spawn_timer: f32,
-    pub boss_pending: bool,
-    /// Seconds since every monster of the wave has been spawned.
-    pub clearing_time: f32,
+    /// Index of the next boss in `economy::BOSS_TIMES`.
+    pub next_boss: usize,
+    /// Fractional ghosts waiting to spawn.
+    pub ghost_credits: f32,
     pub rng: Rng,
     pub spawned: u32,
-    /// Set when a wave is cleared (consumed by the Medkit healing).
-    pub just_cleared: bool,
 }
 
 impl Default for Director {
     fn default() -> Self {
-        Self { budget: 0.0, spawn_timer: 2.0, boss_pending: false, clearing_time: 0.0, rng: Rng::new(0xD1EC), spawned: 0, just_cleared: false }
+        Self { credits: 3.0, spawn_timer: 3.0, next_boss: 0, ghost_credits: 0.0, rng: Rng::new(0xD1EC), spawned: 0 }
     }
 }
 
@@ -91,14 +90,15 @@ pub fn spawn_mob(commands: &mut Commands, kind: MobKind, pos: Vec3, level: u32, 
         .id()
 }
 
-/// Boss of a boss wave: Colossus, Queen, Titan, then again (stronger).
-pub fn boss_for_wave(wave: u32) -> MobKind {
-    MobKind::BOSSES[((wave / 5).max(1) as usize - 1) % MobKind::BOSSES.len()]
+/// The n-th boss of the run: Colossus, Queen, Titan, then again.
+pub fn boss_for_index(i: usize) -> MobKind {
+    MobKind::BOSSES[i % MobKind::BOSSES.len()]
 }
 
-/// Chance that a spawned monster is an elite.
-pub fn elite_chance(wave: u32) -> f32 {
-    if wave < 3 { 0.0 } else { (0.03 * (wave - 2) as f32).min(0.35) }
+/// Chance that a spawned monster is an elite (after 3 minutes).
+pub fn elite_chance(elapsed: f32) -> f32 {
+    let minutes = elapsed / 60.0;
+    if minutes < 3.0 { 0.0 } else { (0.03 * (minutes - 2.0)).min(0.35) }
 }
 
 /// A random point on a ring around one of `anchors`, on the ground.
@@ -128,109 +128,100 @@ fn director(
     let n_players = players.iter().count() as u32;
     let alive_mobs = mobs.iter().count();
     info.enemies_left = alive_mobs as u16;
+    let t = info.elapsed;
+    let level = info.level;
 
-    match info.wave_phase {
-        WavePhase::Break => {
-            info.wave_timer -= DT;
-            if info.wave_timer > 0.0 {
-                return;
-            }
-            // --- Start the next wave.
-            info.wave += 1;
-            info.wave_phase = WavePhase::Fighting;
-            let wave = info.wave;
-            dir.budget = economy::wave_budget(wave, n_players);
-            dir.boss_pending = economy::is_boss_wave(wave);
-            dir.clearing_time = 0.0;
-            dir.spawn_timer = 1.0;
-            info.wave_spawning = true;
-            info!("=== wave {wave} (budget {:.0}{}) ===", dir.budget, if dir.boss_pending { ", BOSS" } else { "" });
-            events.write(ToClients {
-                targets: SendTargets::All,
-                message: GameEvent::WaveStarted { wave, boss: dir.boss_pending },
-            });
-        }
-        WavePhase::Fighting => {
-            let wave = info.wave;
-            let level = economy::monster_level(wave);
-            dir.spawn_timer -= DT;
+    // --- Bosses at fixed times.
+    if let Some(&at) = economy::BOSS_TIMES.get(dir.next_boss)
+        && t >= at
+    {
+        let kind = boss_for_index(dir.next_boss);
+        dir.next_boss += 1;
+        let pos = ring_point(&terrain, &mut dir.rng, &alive, 35.0, 45.0);
+        let pos = pos + Vec3::Y * if kind.def().flying { 8.0 } else { 0.2 };
+        spawn_mob(&mut commands, kind, pos, level, tick.0, 0.0, false);
+        info.boss_alive = true;
+        events.write(ToClients { targets: SendTargets::All, message: GameEvent::BossSpawned });
+        info!("BOSS {kind:?} at {:.0}s", t);
+    }
 
-            // The boss of a boss wave arrives a few seconds in.
-            if dir.boss_pending && dir.spawn_timer <= 0.0 {
-                dir.boss_pending = false;
-                let pos = ring_point(&terrain, &mut dir.rng, &alive, 35.0, 45.0);
-                spawn_mob(&mut commands, boss_for_wave(wave), pos, level, tick.0, 0.0, false);
-                info.boss_alive = true;
-                events.write(ToClients { targets: SendTargets::All, message: GameEvent::BossSpawned });
-                info!("BOSS spawned at {pos:?}");
-            }
-
-            info.wave_spawning = dir.budget > 0.0 || dir.boss_pending;
-            if !info.wave_spawning {
-                dir.clearing_time += DT;
-                if alive_mobs == 0 {
-                    // --- Wave cleared!
-                    info.wave_phase = WavePhase::Break;
-                    info.wave_timer = economy::WAVE_BREAK;
-                    dir.just_cleared = true;
-                    info!("wave {wave} cleared");
-                    events.write(ToClients { targets: SendTargets::All, message: GameEvent::WaveCleared { wave } });
-                }
-                return;
-            }
-            if dir.budget <= 0.0 || dir.spawn_timer > 0.0 || alive_mobs >= economy::max_alive_monsters(n_players, wave) {
-                return;
-            }
-            dir.spawn_timer = economy::spawn_interval(wave) * dir.rng.range(0.7, 1.3);
-
-            // Choose a monster type among those unlocked at this wave.
-            let options: Vec<MobKind> = MobKind::SPAWNABLE.into_iter().filter(|k| k.def().unlock_wave <= wave).collect();
-            let weights: Vec<f32> = options.iter().map(|k| k.def().spawn_weight).collect();
-            let kind = options[dir.rng.weighted_index(&weights)];
-            let cost = kind.def().cost;
-            // A small pack of the same type (the last pack may overspend a bit).
-            let pack = dir.rng.range_u32(1, 5).min((dir.budget / cost).ceil() as u32).max(1);
-            let center = ring_point(&terrain, &mut dir.rng, &alive, 28.0, 45.0);
-            for i in 0..pack {
-                let offset = Vec3::new(dir.rng.range(-3.0, 3.0), 0.0, dir.rng.range(-3.0, 3.0));
-                let mut pos = center + offset;
-                pos.y = terrain.wgen.ground_height(pos.x, pos.z) + if kind.def().flying { 6.0 } else { 0.2 };
-                let phase = dir.rng.range(0.0, 100.0);
-                let elite = dir.rng.chance(elite_chance(wave));
-                spawn_mob(&mut commands, kind, pos, level, tick.0, phase + i as f32, elite);
-                dir.budget -= cost;
-                dir.spawned += 1;
-            }
+    // --- Final Swarm: ghosts, stronger every minute, forever.
+    let swarm = if t >= economy::BLACK_GHOSTS_TIME { 2 } else if t >= economy::FINAL_SWARM_TIME { 1 } else { 0 };
+    if swarm > info.swarm {
+        info.swarm = swarm;
+        events.write(ToClients { targets: SendTargets::All, message: GameEvent::SwarmStarted { black: swarm == 2 } });
+        info!("FINAL SWARM phase {swarm} at {:.0}s", t);
+    }
+    if swarm > 0 && alive_mobs < 160 {
+        dir.ghost_credits += economy::ghost_rate(t, n_players) * DT;
+        let mult = economy::swarm_mult(t);
+        while dir.ghost_credits >= 1.0 {
+            dir.ghost_credits -= 1.0;
+            let black = swarm == 2 && dir.rng.chance(((t - economy::BLACK_GHOSTS_TIME) / 300.0 + 0.3).min(0.85));
+            let kind = if black { MobKind::BlackGhost } else { MobKind::WhiteGhost };
+            let pos = ring_point(&terrain, &mut dir.rng, &alive, 30.0, 40.0) + Vec3::Y * 2.0;
+            let e = spawn_mob(&mut commands, kind, pos, level, tick.0, dir.rng.range(0.0, 100.0), false);
+            let hp = kind.def().hp * economy::monster_hp_mult(level) * mult;
+            commands.entity(e).insert((GhostScaling(mult), Health::new(hp)));
         }
     }
+
+    // --- Regular monsters: a budget that grows faster and faster.
+    dir.credits += economy::spawn_rate(t, n_players) * DT;
+    dir.spawn_timer -= DT;
+    if dir.spawn_timer > 0.0 || alive_mobs >= economy::max_alive_time(t, n_players) {
+        return;
+    }
+    dir.spawn_timer = dir.rng.range(1.0, 2.5);
+    let minutes = t / 60.0;
+    let options: Vec<MobKind> = MobKind::SPAWNABLE
+        .into_iter()
+        .filter(|k| k.def().unlock_minute <= minutes && k.def().cost <= dir.credits)
+        .collect();
+    if options.is_empty() {
+        return;
+    }
+    let weights: Vec<f32> = options.iter().map(|k| k.def().spawn_weight).collect();
+    let kind = options[dir.rng.weighted_index(&weights)];
+    let cost = kind.def().cost;
+    let pack = dir.rng.range_u32(1, 6).min((dir.credits / cost) as u32).max(1);
+    let center = ring_point(&terrain, &mut dir.rng, &alive, 26.0, 42.0);
+    for i in 0..pack {
+        let offset = Vec3::new(dir.rng.range(-3.0, 3.0), 0.0, dir.rng.range(-3.0, 3.0));
+        let mut pos = center + offset;
+        pos.y = terrain.wgen.ground_height(pos.x, pos.z) + if kind.def().flying { 6.0 } else { 0.2 };
+        let elite = dir.rng.chance(elite_chance(t));
+        let phase = dir.rng.range(0.0, 100.0);
+        spawn_mob(&mut commands, kind, pos, level, tick.0, phase + i as f32, elite);
+        dir.credits -= cost;
+        dir.spawned += 1;
+    }
 }
+
+/// Final Swarm ghosts carry their strength multiplier (HP set at spawn,
+/// speed and damage applied by the AI).
+#[derive(Component, Debug, Clone, Copy)]
+pub struct GhostScaling(pub f32);
 
 /// Monsters too far from every player, or the last ones of a wave that
 /// survive too long, are brought back next to the players: the wave can
 /// always be finished, nobody has to hunt a lost monster across the map.
 fn bring_back_stragglers(
     mut dir: ResMut<Director>,
-    info: Single<&MatchInfo>,
     players: Query<(&PlayerState, &Health)>,
     mut mobs: Query<(&Mob, &mut MobState, &mut MobAi)>,
     terrain: Res<TerrainRes>,
     mut fx: MessageWriter<ToClients<Fx>>,
 ) {
     let alive: Vec<Vec3> = players.iter().filter(|(_, h)| !h.downed).map(|(s, _)| s.sim.mv.pos).collect();
-    if alive.is_empty() || info.wave_phase != WavePhase::Fighting {
+    if alive.is_empty() {
         return;
-    }
-    // Time rule only once the whole wave has spawned. Re-armed every 10 s so
-    // a fleeing monster is not warped every single tick.
-    let too_long = !info.wave_spawning && dir.clearing_time > economy::STRAGGLER_TIME;
-    if too_long {
-        dir.clearing_time = economy::STRAGGLER_TIME - 10.0;
     }
     for (mob, mut state, mut ai) in &mut mobs {
         let nearest = alive.iter().map(|p| p.distance(state.pos)).fold(f32::INFINITY, f32::min);
-        if nearest > economy::STRAGGLER_DISTANCE || (too_long && nearest > 15.0) {
+        if nearest > economy::STRAGGLER_DISTANCE {
             let from = state.pos;
-            let mut to = ring_point(&terrain, &mut dir.rng, &alive, 16.0, 24.0);
+            let mut to = ring_point(&terrain, &mut dir.rng, &alive, 25.0, 35.0);
             if mob.kind.def().flying {
                 to.y += 5.0;
             }
@@ -246,7 +237,7 @@ pub fn yaw_toward(dir: Vec3) -> f32 {
     f32::atan2(-dir.x, -dir.z)
 }
 
-type MobQuery<'a> = (Entity, &'a Mob, &'a mut MobState, &'a mut MobAi, &'a mut MobHistory, &'a Health);
+type MobQuery<'a> = (Entity, &'a Mob, &'a mut MobState, &'a mut MobAi, &'a mut MobHistory, &'a Health, Option<&'a GhostScaling>);
 
 #[allow(clippy::too_many_arguments)]
 fn mob_ai(
@@ -266,12 +257,13 @@ fn mob_ai(
         .map(|(e, s, _)| (e, s.sim.mv.pos, s.sim.mv.vel))
         .collect();
 
-    for (entity, mob, mut state, mut ai, mut history, health) in &mut mobs {
+    for (entity, mob, mut state, mut ai, mut history, health, ghost) in &mut mobs {
         if health.hp <= 0.0 {
             continue;
         }
         let def = mob.kind.def();
-        let dmg_mult = economy::monster_damage_mult(mob.level) * if mob.elite { ELITE_DAMAGE } else { 1.0 };
+        let ghost_mult = ghost.map(|g| g.0).unwrap_or(1.0);
+        let dmg_mult = economy::monster_damage_mult(mob.level) * if mob.elite { ELITE_DAMAGE } else { 1.0 } * ghost_mult;
         ai.phase += DT;
         ai.cooldown -= DT;
         ai.attack_anim = (ai.attack_anim - DT).max(0.0);
@@ -299,6 +291,13 @@ fn mob_ai(
 
             // --- Movement intention per type.
             want = match mob.kind {
+                // Ghosts fly straight at you, through everything, faster every minute.
+                MobKind::WhiteGhost | MobKind::BlackGhost => {
+                    let wobble = Vec3::new((ai.phase * 2.3).sin(), (ai.phase * 1.7).cos() * 0.5, (ai.phase * 1.9).cos()) * 0.25;
+                    ((chest - (state.pos + Vec3::Y * def.height * 0.5)).normalize_or_zero() + wobble).normalize_or_zero()
+                        * def.speed
+                        * ghost_mult.powf(0.35).min(3.0)
+                }
                 MobKind::Skitter => (dir + side * (ai.phase * 3.0).sin() * 0.5).normalize_or_zero() * def.speed,
                 MobKind::Spitter => {
                     if dist > 22.0 {
@@ -408,7 +407,7 @@ fn mob_ai(
                                 }
                             }
                         }
-                        MobKind::Skitter => {
+                        MobKind::Skitter | MobKind::WhiteGhost | MobKind::BlackGhost => {
                             if to.length() < def.attack_range * 1.5 {
                                 damage.write(DamagePlayer { target: target_entity, amount: damage_amount, attacker: Some(entity) });
                             }

@@ -393,6 +393,10 @@ pub struct PlayerStats {
     /// Fraction of max HP healed at the end of each wave.
     pub wave_heal: f32,
     pub cards: usize,
+    /// XP gem pickup radius multiplier.
+    pub attraction: f32,
+    /// XP gain multiplier.
+    pub xp_mult: f32,
 }
 
 pub const BASE_MAX_HP: f32 = 100.0;
@@ -436,6 +440,8 @@ impl PlayerStats {
             luck: inv.count(Clover),
             wave_heal: (0.35 * n(Medkit)).min(1.0),
             cards: 3 + inv.count(Crown) as usize,
+            attraction: 1.0,
+            xp_mult: 1.0,
         }
     }
 

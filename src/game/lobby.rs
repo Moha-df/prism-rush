@@ -66,11 +66,11 @@ fn setup_server_match(
             level: 1,
             tick: 0,
             boss_alive: false,
-            wave: 1,
-            wave_phase: WavePhase::Break,
-            wave_timer: 0.0,
+            team_level: 1,
+            xp: 0.0,
+            xp_next: economy::xp_to_next(1),
+            swarm: 0,
             enemies_left: 0,
-            wave_spawning: false,
         },
     ));
     let mut slot = 0u8;
@@ -96,6 +96,7 @@ fn player_bundle(slot: u8, name: String, is_bot: bool, owner: Owner) -> impl Bun
         Intent::default(),
         PlayerScore::default(),
         super::players::HurtClock::default(),
+        super::progress::LevelUps::default(),
     )
 }
 
@@ -214,27 +215,28 @@ pub fn start_match(
     });
     terrain.0 = Terrain::new(seed);
     *director = Director::default();
+    // Bosses whose time is already past (debug --start-time) are skipped.
+    director.next_boss = crate::shared::economy::BOSS_TIMES.iter().filter(|t| **t <= config.start_time).count();
     *chests = ChestRegistry::default();
 
     info.phase = Phase::Playing;
     info.seed = seed;
-    info.elapsed = 0.0;
+    info.elapsed = config.start_time;
     info.difficulty = 1.0;
     info.level = 1;
     info.tick = tick.0;
     info.boss_alive = false;
-    // First wave starts after a short grace period.
-    info.wave = 0;
-    info.wave_phase = WavePhase::Break;
-    info.wave_timer = 5.0;
+    info.team_level = 1;
+    info.xp = 0.0;
+    info.xp_next = economy::xp_to_next(1);
+    info.swarm = 0;
     info.enemies_left = 0;
-    info.wave_spawning = false;
 
     for (entity, player) in &players {
         commands
             .entity(entity)
             .insert(run_components(&terrain, player.slot))
-            .insert((PlayerScore::default(), InputQueue::default()));
+            .insert((PlayerScore::default(), InputQueue::default(), super::progress::LevelUps::default()));
     }
     info!("=== run started (seed {seed}, {} players) ===", players.iter().count());
 }
@@ -255,7 +257,7 @@ pub fn back_to_lobby(mut commands: Commands, mut info: Single<&mut MatchInfo>, p
 /// Despawns monsters, chests and projectiles (the run's world).
 pub fn despawn_world_entities(
     mut commands: Commands,
-    q: Query<Entity, Or<(With<Mob>, With<Chest>, With<Projectile>, With<WeaponPickup>, With<Hazard>, With<Statue>)>>,
+    q: Query<Entity, Or<(With<Mob>, With<Chest>, With<Projectile>, With<WeaponPickup>, With<Hazard>, With<Statue>, With<XpGem>)>>,
 ) {
     for e in &q {
         commands.entity(e).try_despawn();
@@ -281,8 +283,8 @@ fn advance_match_clock(
     tick.0 += 1;
     let n = players.iter().count() as u32;
     info.elapsed += time.delta_secs();
-    info.difficulty = economy::wave_difficulty(info.wave, n);
-    info.level = economy::monster_level(info.wave);
+    info.difficulty = economy::time_difficulty(info.elapsed, n);
+    info.level = economy::time_monster_level(info.elapsed);
     info.tick = tick.0;
 }
 
@@ -302,7 +304,7 @@ fn check_game_over(
         return;
     }
     info.phase = Phase::GameOver;
-    let mut summary = RunSummary { duration: info.elapsed, level: info.wave, players: Vec::new() };
+    let mut summary = RunSummary { duration: info.elapsed, level: info.team_level, players: Vec::new() };
     for (player, _, score, items) in &players {
         summary.players.push(PlayerSummary {
             slot: player.slot,
@@ -318,7 +320,7 @@ fn check_game_over(
     }
     summary.players.sort_by_key(|p| p.slot);
     info!(
-        "=== GAME OVER after {:.0}s, wave {} — {} ===",
+        "=== GAME OVER after {:.0}s, team level {} — {} ===",
         summary.duration,
         summary.level,
         summary

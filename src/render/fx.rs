@@ -61,6 +61,10 @@ pub struct HudFeedback {
 #[derive(Resource)]
 struct FxRng(Rng);
 
+/// Plays the gem sound only every few gems (vacuuming 50 gems = 50 sounds otherwise).
+#[derive(Default)]
+struct GemSound(i32);
+
 pub struct FxPlugin;
 
 impl Plugin for FxPlugin {
@@ -196,6 +200,8 @@ fn on_server_fx(
     local: Res<LocalPlayer>,
     camera: Query<&GlobalTransform, With<MainCamera>>,
     mobs: Query<(Entity, &Transform), With<Mob>>,
+    players: Query<(&crate::net::protocol::Player, &Transform), Without<Mob>>,
+    mut gem_sound_cooldown: Local<GemSound>,
 ) {
     let cam = camera.single().map(|c| c.translation()).unwrap_or_default();
     let rng = &mut rng.0;
@@ -272,6 +278,29 @@ fn on_server_fx(
                 let d = pos.distance(cam);
                 cam_fx.add_trauma((0.5 - d / 40.0).max(0.0));
             }
+            Fx::XpCollected { from, slot } => {
+                // The gem flies to the player who collected it.
+                if let Some((_, t)) = players.iter().find(|(p, _)| p.slot == *slot) {
+                    let target = t.translation + Vec3::Y * 1.0;
+                    let life = 0.22;
+                    let mesh = cache.mesh(&mut meshes, Prim::Ico, Vec3::ONE);
+                    let mat = cache.material(&mut materials, palette::GLOW_CYAN, 4.0);
+                    commands.spawn((
+                        Particle { vel: (target - *from) / life, life, max_life: life, gravity: 0.0, drag: 0.0, size: 0.3 },
+                        Mesh3d(mesh),
+                        MeshMaterial3d(mat),
+                        Transform::from_translation(*from).with_scale(Vec3::splat(0.3)),
+                        NotShadowCaster,
+                    ));
+                }
+                if Some(*slot) == local.slot {
+                    gem_sound_cooldown.0 -= 1;
+                    if gem_sound_cooldown.0 <= 0 {
+                        gem_sound_cooldown.0 = 3;
+                        sfx.write(PlaySfx { volume: 0.35, ..PlaySfx::ui(Sfx::Coin) });
+                    }
+                }
+            }
             Fx::Arc { from, to } => {
                 tracer(&mut commands, &mut cache, &mut meshes, &mut materials, *from, *to, palette::GLOW_CYAN, 0.08);
                 burst(&mut commands, &mut cache, &mut meshes, &mut materials, rng, *to, 6, palette::GLOW_CYAN, 6.0, 5.0, 0.06, 0.25, 0.0);
@@ -334,11 +363,11 @@ fn on_game_events(
             GameEvent::BossKilled => {
                 sfx.write(PlaySfx::ui(Sfx::ChestOpen));
             }
-            GameEvent::WaveStarted { boss, .. } => {
-                sfx.write(PlaySfx::ui(if *boss { Sfx::BossRoar } else { Sfx::Telegraph }));
-            }
-            GameEvent::WaveCleared { .. } => {
+            GameEvent::LevelUp { .. } => {
                 sfx.write(PlaySfx::ui(Sfx::Revived));
+            }
+            GameEvent::SwarmStarted { .. } => {
+                sfx.write(PlaySfx::ui(Sfx::BossRoar));
             }
             GameEvent::GameOver(_) => {}
         }

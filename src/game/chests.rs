@@ -195,11 +195,12 @@ fn open_chests(
         let Some((entity, chest, mut open)) = nearest else { continue };
 
         let stats = PlayerStats::from_inventory(&items.0);
-        let price = player_price(chest.kind, info.wave, &stats);
+        let price = player_price(chest.kind, wallet.chests_opened, info.elapsed, &stats);
         if wallet.gold < price {
             continue;
         }
         wallet.gold -= price;
+        wallet.chests_opened += 1;
         open.opened = true;
         registry.opened.insert(chest.spot_id);
         registry.spawned.remove(&chest.spot_id);
@@ -226,9 +227,10 @@ fn open_chests(
     }
 }
 
-/// Price of a chest for a given player (Treasure Map discount).
-pub fn player_price(kind: ChestKind, wave: u32, stats: &PlayerStats) -> u32 {
-    ((economy::chest_price(kind, wave) as f32) * stats.price_mult).round() as u32
+/// Price of a chest for a given player: goes up with every chest they opened
+/// (Treasure Map discount).
+pub fn player_price(kind: ChestKind, opened: u32, elapsed: f32, stats: &PlayerStats) -> u32 {
+    ((economy::chest_price_v3(kind, opened, elapsed) as f32) * stats.price_mult).round() as u32
 }
 
 pub const STATUE_RANGE: f32 = 3.5;
@@ -264,7 +266,7 @@ fn awaken_statues(
         let x = statue.pos.x - angle.x * 25.0;
         let z = statue.pos.z - angle.z * 25.0;
         let spawn = Vec3::new(x, terrain.wgen.ground_height(x, z) + if statue.boss.def().flying { 8.0 } else { 0.2 }, z);
-        let level = economy::monster_level(info.wave.max(1));
+        let level = info.level;
         crate::game::mobs::spawn_mob(&mut commands, statue.boss, spawn, level, tick.0, 0.0, false);
         info.boss_alive = true;
         info!("{} awakened a statue: {:?}", player.name, statue.boss);
@@ -335,7 +337,7 @@ mod tests {
         let mut inv = Inventory::default();
         inv.add(ItemKind::TreasureMap);
         let map = PlayerStats::from_inventory(&inv);
-        assert!(player_price(ChestKind::Large, 3, &map) < player_price(ChestKind::Large, 3, &base));
-        assert_eq!(player_price(ChestKind::Small, 1, &base), economy::chest_price(ChestKind::Small, 1));
+        assert!(player_price(ChestKind::Large, 3, 60.0, &map) < player_price(ChestKind::Large, 3, 60.0, &base));
+        assert_eq!(player_price(ChestKind::Small, 0, 0.0, &base), economy::chest_price_v3(ChestKind::Small, 0, 0.0));
     }
 }

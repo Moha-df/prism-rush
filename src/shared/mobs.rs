@@ -28,6 +28,10 @@ pub enum MobKind {
     HiveQueen,
     /// Ground boss: shockwaves to jump over + telegraphed lightning strikes.
     StormTitan,
+    /// Final Swarm (15 min+): flies through everything, gets stronger every minute.
+    WhiteGhost,
+    /// Final Swarm (20 min+): faster and deadlier.
+    BlackGhost,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -48,8 +52,8 @@ pub struct MobDef {
     pub cost: f32,
     /// Gold paid to every player on kill (before difficulty scaling).
     pub gold: f32,
-    /// First wave where it can spawn.
-    pub unlock_wave: u32,
+    /// Minute of the run from which it can spawn.
+    pub unlock_minute: f32,
     /// Relative spawn probability among unlocked monsters.
     pub spawn_weight: f32,
     pub flying: bool,
@@ -83,7 +87,7 @@ impl MobKind {
                 windup: 0.35,
                 cost: 1.0,
                 gold: 3.0,
-                unlock_wave: 1,
+                unlock_minute: 0.0,
                 spawn_weight: 3.0,
                 flying: false,
                 ranged: false,
@@ -100,7 +104,7 @@ impl MobKind {
                 windup: 0.6,
                 cost: 2.0,
                 gold: 5.0,
-                unlock_wave: 2,
+                unlock_minute: 1.0,
                 spawn_weight: 2.0,
                 flying: false,
                 ranged: true,
@@ -117,7 +121,7 @@ impl MobKind {
                 windup: 0.5,
                 cost: 2.0,
                 gold: 5.0,
-                unlock_wave: 3,
+                unlock_minute: 2.0,
                 spawn_weight: 2.0,
                 flying: true,
                 ranged: true,
@@ -134,7 +138,7 @@ impl MobKind {
                 windup: 0.55,
                 cost: 2.0,
                 gold: 4.0,
-                unlock_wave: 4,
+                unlock_minute: 3.5,
                 spawn_weight: 1.4,
                 flying: false,
                 ranged: false,
@@ -151,7 +155,7 @@ impl MobKind {
                 windup: 0.7,
                 cost: 7.0,
                 gold: 18.0,
-                unlock_wave: 6,
+                unlock_minute: 6.0,
                 spawn_weight: 1.0,
                 flying: false,
                 ranged: false,
@@ -168,7 +172,7 @@ impl MobKind {
                 windup: 1.0,
                 cost: 0.0,
                 gold: 150.0,
-                unlock_wave: 999,
+                unlock_minute: 999.0,
                 spawn_weight: 0.0,
                 flying: false,
                 ranged: true,
@@ -185,7 +189,7 @@ impl MobKind {
                 windup: 0.9,
                 cost: 3.0,
                 gold: 8.0,
-                unlock_wave: 3,
+                unlock_minute: 3.0,
                 spawn_weight: 1.3,
                 flying: false,
                 ranged: true,
@@ -202,7 +206,7 @@ impl MobKind {
                 windup: 0.4,
                 cost: 2.0,
                 gold: 4.0,
-                unlock_wave: 2,
+                unlock_minute: 0.5,
                 spawn_weight: 1.6,
                 flying: false,
                 ranged: false,
@@ -219,7 +223,7 @@ impl MobKind {
                 windup: 0.25,
                 cost: 0.0,
                 gold: 1.0,
-                unlock_wave: 999,
+                unlock_minute: 999.0,
                 spawn_weight: 0.0,
                 flying: false,
                 ranged: false,
@@ -236,7 +240,7 @@ impl MobKind {
                 windup: 0.8,
                 cost: 4.0,
                 gold: 10.0,
-                unlock_wave: 5,
+                unlock_minute: 5.0,
                 spawn_weight: 0.8,
                 flying: true,
                 ranged: true,
@@ -253,7 +257,7 @@ impl MobKind {
                 windup: 0.8,
                 cost: 0.0,
                 gold: 160.0,
-                unlock_wave: 999,
+                unlock_minute: 999.0,
                 spawn_weight: 0.0,
                 flying: true,
                 ranged: true,
@@ -270,12 +274,50 @@ impl MobKind {
                 windup: 1.1,
                 cost: 0.0,
                 gold: 180.0,
-                unlock_wave: 999,
+                unlock_minute: 999.0,
                 spawn_weight: 0.0,
                 flying: false,
                 ranged: true,
             },
+            MobKind::WhiteGhost => MobDef {
+                name: "Fantôme blanc",
+                hp: 60.0,
+                speed: 9.0,
+                radius: 0.6,
+                height: 1.4,
+                damage: 12.0,
+                attack_range: 1.6,
+                attack_cooldown: 0.8,
+                windup: 0.15,
+                cost: 0.0,
+                gold: 2.0,
+                unlock_minute: 999.0,
+                spawn_weight: 0.0,
+                flying: true,
+                ranged: false,
+            },
+            MobKind::BlackGhost => MobDef {
+                name: "Fantôme noir",
+                hp: 160.0,
+                speed: 12.0,
+                radius: 0.7,
+                height: 1.6,
+                damage: 25.0,
+                attack_range: 1.8,
+                attack_cooldown: 0.7,
+                windup: 0.12,
+                cost: 0.0,
+                gold: 4.0,
+                unlock_minute: 999.0,
+                spawn_weight: 0.0,
+                flying: true,
+                ranged: false,
+            },
         }
+    }
+
+    pub fn is_ghost(self) -> bool {
+        matches!(self, MobKind::WhiteGhost | MobKind::BlackGhost)
     }
 
     pub fn is_boss(self) -> bool {

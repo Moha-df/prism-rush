@@ -37,6 +37,8 @@ pub struct AppConfig {
     pub shots: Option<String>,
     /// Debug: the local player is driven by the bot brain.
     pub autopilot: bool,
+    /// Debug: runs start at this time (seconds), to test late game.
+    pub start_time: f32,
 }
 
 const SETTINGS_FILE: &str = "settings.txt";
@@ -58,6 +60,7 @@ impl Default for AppConfig {
             seed: None,
             shots: None,
             autopilot: false,
+            start_time: 0.0,
         }
     }
 }

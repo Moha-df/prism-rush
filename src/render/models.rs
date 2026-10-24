@@ -88,7 +88,63 @@ pub fn mob(kind: MobKind) -> Part {
         MobKind::Shaman => shaman(),
         MobKind::HiveQueen => hive_queen(),
         MobKind::StormTitan => storm_titan(),
+        MobKind::WhiteGhost => ghost(false),
+        MobKind::BlackGhost => ghost(true),
     }
+}
+
+/// Final Swarm ghost: a floating sheet with a wavy tail and empty eyes.
+/// White ghosts glow softly; black ghosts are dark with red eyes and horns.
+fn ghost(black: bool) -> Part {
+    let (body, glow, eyes, eye_glow) = if black {
+        (rgb(0.08, 0.05, 0.12), 0.0, GLOW_MAGENTA, 6.0)
+    } else {
+        (rgb(0.92, 0.95, 1.0), 0.8, rgb(0.05, 0.05, 0.1), 0.0)
+    };
+    let mut tail = Part::pivot().at(0.0, 0.35, 0.0).tag(AnimTag::Wing(0.0));
+    for i in 0..6 {
+        let a = i as f32 / 6.0 * std::f32::consts::TAU;
+        tail = tail.with(Part::cone(0.3, 0.6).at(a.cos() * 0.4, -0.25, a.sin() * 0.4).rot_x(180.0).color(body).glow(glow));
+    }
+    let mut ghost = Part::pivot()
+        .at(0.0, 0.0, 0.0)
+        .tag(AnimTag::Bob)
+        .with(Part::sphere(1.1).at(0.0, 1.0, 0.0).color(body).glow(glow))
+        .with(Part::frustum(1.15, 0.7).at(0.0, 0.5, 0.0).rot_x(180.0).color(body).glow(glow))
+        .with(tail)
+        .with(Part::ellipsoid(0.2, 0.32, 0.1).at(0.2, 1.1, -0.5).color(eyes).glow(eye_glow))
+        .with(Part::ellipsoid(0.2, 0.32, 0.1).at(-0.2, 1.1, -0.5).color(eyes).glow(eye_glow))
+        .with(Part::ellipsoid(0.25, 0.15, 0.1).at(0.0, 0.8, -0.52).color(eyes).glow(eye_glow).tag(AnimTag::Jaw))
+        .with(
+            Part::pivot()
+                .at(0.55, 0.9, -0.1)
+                .tag(AnimTag::ArmL)
+                .with(Part::cone(0.25, 0.6).at(0.0, 0.0, -0.3).rot_x(-80.0).color(body).glow(glow)),
+        )
+        .with(
+            Part::pivot()
+                .at(-0.55, 0.9, -0.1)
+                .tag(AnimTag::ArmR)
+                .with(Part::cone(0.25, 0.6).at(0.0, 0.0, -0.3).rot_x(-80.0).color(body).glow(glow)),
+        );
+    if black {
+        ghost = ghost
+            .with(Part::cone(0.18, 0.5).at(0.32, 1.55, 0.0).rot_z(-25.0).color(PLUM_DARK))
+            .with(Part::cone(0.18, 0.5).at(-0.32, 1.55, 0.0).rot_z(25.0).color(PLUM_DARK))
+            .with(Part::torus(1.6, 0.06).at(0.0, 0.2, 0.0).color(GLOW_MAGENTA).glow(3.0).tag(AnimTag::Spin(4.0)));
+    }
+    Part::pivot().with(ghost)
+}
+
+/// XP gem: a small spinning cyan crystal.
+pub fn xp_gem(value: f32) -> Part {
+    let s = (0.25 + value.sqrt() * 0.05).min(0.6);
+    let color = if value >= 15.0 { GLOW_MAGENTA } else if value >= 6.0 { GOLD } else { GLOW_CYAN };
+    Part::pivot().with(
+        Part::pivot()
+            .tag(AnimTag::Bob)
+            .with(Part::pivot().tag(AnimTag::Spin(3.0)).with(Part::ico(s, s * 1.6, s).color(color).glow(3.0))),
+    )
 }
 
 /// Crystal rhino: low, wide, a big glowing horn. Reads as "it will charge".
