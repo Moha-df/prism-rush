@@ -696,6 +696,13 @@ fn toasts_from_events(
                 if *black { "Les fantômes NOIRS arrivent…".to_string() } else { "ESSAIM FINAL : les fantômes arrivent !".to_string() },
                 crate::render::palette::GLOW_MAGENTA,
             ),
+            GameEvent::NewMonster { kind } => (
+                format!("Nouveau : {} — {}", kind.def().name, kind.hint()),
+                if kind.is_boss() { crate::render::palette::GLOW_ORANGE } else { Color::srgb(0.85, 0.8, 1.0) },
+            ),
+            GameEvent::BossToppled { kind } => {
+                (format!("{} s'effondre : TIREZ, dégâts doublés !", kind.def().name), crate::render::palette::GOLD)
+            }
             GameEvent::GameOver(_) => continue,
         };
         commands.spawn((

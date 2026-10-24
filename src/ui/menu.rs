@@ -176,7 +176,10 @@ fn handle_actions(
             UiAction::Solo | UiAction::Host => {
                 store_name(&mut config, &name);
                 config.launch = LaunchMode::Host;
-                config.autostart = *action == UiAction::Solo;
+                // Solo also goes through the lobby (to pick the weapons), but
+                // the game is not announced in the public list.
+                config.autostart = false;
+                config.solo = *action == UiAction::Solo;
                 net.write(NetCommand::Host);
             }
             UiAction::JoinListed(i) => {

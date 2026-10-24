@@ -162,15 +162,21 @@ fn flash_light(commands: &mut Commands, pos: Vec3, color: Color, intensity: f32,
     ));
 }
 
-fn damage_number(commands: &mut Commands, pos: Vec3, amount: u16, crit: bool, rng: &mut Rng) {
-    let (size, color) = if crit { (30.0, Color::srgb(1.0, 0.85, 0.2)) } else { (20.0, Color::WHITE) };
+/// `zone`: 0 body, 1 weak point (big orange), 2 armor (small grey).
+fn damage_number(commands: &mut Commands, pos: Vec3, amount: u16, crit: bool, zone: u8, rng: &mut Rng) {
+    let (size, color) = match (zone, crit) {
+        (1, _) => (34.0, Color::srgb(1.0, 0.45, 0.1)),
+        (2, _) => (15.0, Color::srgb(0.6, 0.62, 0.68)),
+        (_, true) => (30.0, Color::srgb(1.0, 0.85, 0.2)),
+        _ => (20.0, Color::WHITE),
+    };
     commands.spawn((
         DamageNumber {
             world: pos + Vec3::new(rng.range(-0.3, 0.3), 0.3, rng.range(-0.3, 0.3)),
             life: 0.8,
             max_life: 0.8,
         },
-        Text::new(if crit { format!("{amount}!") } else { amount.to_string() }),
+        Text::new(if crit || zone == 1 { format!("{amount}!") } else { amount.to_string() }),
         crate::ui::widgets::bold(size),
         TextColor(color),
         TextShadow::default(),
@@ -218,7 +224,7 @@ fn on_server_fx(
     let rng = &mut rng.0;
     for fx in fx_in.read() {
         match fx {
-            Fx::Hit { pos, amount, crit, killed, by_slot } => {
+            Fx::Hit { pos, amount, crit, killed, by_slot, zone } => {
                 // Squash the monster that was hit (the closest one to the impact).
                 if let Some((e, _)) = mobs
                     .iter()
@@ -230,7 +236,11 @@ fn on_server_fx(
                 }
                 let color = if *crit { palette::GOLD } else { Color::srgb(1.0, 0.9, 0.7) };
                 burst(&mut commands, &mut cache, &mut meshes, &mut materials, rng, *pos, 5, color, 5.0, 6.0, 0.07, 0.25, 9.0);
-                damage_number(&mut commands, *pos, *amount, *crit, rng);
+                damage_number(&mut commands, *pos, *amount, *crit, *zone, rng);
+                if *zone == 2 {
+                    // Bounces off a shell or a shield: grey sparks.
+                    burst(&mut commands, &mut cache, &mut meshes, &mut materials, rng, *pos, 6, palette::METAL_LIGHT, 2.0, 7.0, 0.06, 0.2, 12.0);
+                }
                 if *killed {
                     burst(&mut commands, &mut cache, &mut meshes, &mut materials, rng, *pos, 12, palette::PLUM, 0.0, 7.0, 0.22, 0.8, 18.0);
                     burst(&mut commands, &mut cache, &mut meshes, &mut materials, rng, *pos, 8, palette::GLOW_MAGENTA, 4.0, 5.0, 0.1, 0.5, 4.0);
@@ -240,9 +250,9 @@ fn on_server_fx(
                 }
                 if Some(*by_slot) == local.slot {
                     feedback.hitmarker = 0.18;
-                    feedback.hitmarker_crit = *crit;
+                    feedback.hitmarker_crit = *crit || *zone == 1;
                     feedback.hitmarker_kill = *killed;
-                    sfx.write(PlaySfx::ui(if *crit { Sfx::Crit } else { Sfx::Hit }));
+                    sfx.write(PlaySfx::ui(if *crit || *zone == 1 { Sfx::Crit } else { Sfx::Hit }));
                 }
             }
             Fx::Tracer { slot, weapon, from, to, size } => {
@@ -280,6 +290,19 @@ fn on_server_fx(
                     burst(&mut commands, &mut cache, &mut meshes, &mut materials, rng, p, 1, palette::GLOW_TOXIC, 4.0, 1.5, 0.15, 0.9, -2.0);
                 }
                 sfx.write(PlaySfx { volume: 0.6, ..PlaySfx::at(Sfx::Revived, *pos) });
+            }
+            Fx::EnemyBeam { from, to } => {
+                tracer(&mut commands, &mut cache, &mut meshes, &mut materials, *from, *to, palette::GLOW_MAGENTA, 0.35);
+                tracer(&mut commands, &mut cache, &mut meshes, &mut materials, *from, *to, Color::srgb(1.0, 0.85, 0.95), 0.12);
+                flash_light(&mut commands, *from, palette::GLOW_MAGENTA, 800_000.0, 12.0, 0.2);
+                sfx.write(PlaySfx { volume: 0.8, ..PlaySfx::at(Sfx::Shot(MainWeapon::Sniper), *from) });
+            }
+            Fx::PartBroken { pos } => {
+                burst(&mut commands, &mut cache, &mut meshes, &mut materials, rng, *pos, 30, palette::PLUM, 4.0, 9.0, 0.2, 1.0, 16.0);
+                burst(&mut commands, &mut cache, &mut meshes, &mut materials, rng, *pos, 12, palette::GLOW_ORANGE, 6.0, 7.0, 0.1, 0.5, 6.0);
+                sfx.write(PlaySfx::at(Sfx::Explosion, *pos));
+                let d = pos.distance(cam);
+                cam_fx.add_trauma((0.4 - d / 50.0).max(0.0));
             }
             Fx::Lightning { pos } => {
                 tracer(&mut commands, &mut cache, &mut meshes, &mut materials, *pos + Vec3::new(1.5, 40.0, -1.0), *pos, Color::srgb(0.85, 0.95, 1.0), 0.5);
@@ -392,6 +415,10 @@ fn on_game_events(
                 tracer(&mut commands, &mut cache, &mut meshes, &mut materials, p, p + Vec3::Y * 30.0, palette::GLOW_CYAN, 0.6);
                 flash_light(&mut commands, p + Vec3::Y, palette::GLOW_CYAN, 2_000_000.0, 25.0, 0.8);
                 sfx.write(PlaySfx::ui(Sfx::Revived));
+            }
+            GameEvent::NewMonster { .. } => {}
+            GameEvent::BossToppled { .. } => {
+                sfx.write(PlaySfx::ui(Sfx::BossRoar));
             }
             GameEvent::GameOver(_) => {}
         }

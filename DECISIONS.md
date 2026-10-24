@@ -234,3 +234,32 @@ refusé. Version actuelle :
   `PickLoadout` au salon) ; le serveur ne propose que les armes automatiques de cette liste.
 - **Sanctuaires déterministes** : un emplacement de petit coffre sur 4 (selon son id, donc pareil
   pour tout le monde) devient un sanctuaire de charge. Pas de nouvelle génération de monde.
+
+## V4 : bestiaire, rôles et points faibles
+
+- **Rôle + minute d'apparition** : chaque monstre a un `Role` (petit rapide, gelée, tireur...) et
+  une minute d'apparition. Au début de chaque partie, `roll_roster` garde quelques monstres par
+  rôle (2 ou 3), avec la garantie d'au moins un monstre « du début » dans les rôles de base. Le
+  tirage dépend de la graine de la partie : tous les joueurs voient la même chose, et deux parties
+  ne se ressemblent pas. Les boss sont mélangés de la même façon (`roll_bosses`).
+- **Les zones de dégâts sont des sphères** attachées au monstre (`HitZone` : position locale,
+  rayon, effet). Un tir direct teste la capsule du corps *et* les sphères ; la plus proche gagne,
+  avec une petite tolérance (`ZONE_SLACK`) pour que les points faibles soient agréables à viser.
+  Une carapace ou un bouclier n'est qu'une zone « armure » placée devant : touché de face, c'est
+  elle qu'on touche ; de dos, c'est le corps ou le point faible. Pas besoin de calculer d'angle.
+- **Les dégâts de zone (explosions, aura) ne visent pas les points faibles** : seuls les tirs
+  directs comptent. Ça récompense la visée, ce qui est le cœur de cette version.
+- **Le multiplicateur est appliqué à un seul endroit** (`apply_mob_damage`), à partir du
+  `DamageMob.zone` rempli par le code qui détecte le tir. Pattes cassées, boss au sol et monstres
+  sous terre sont tous gérés là.
+- **Ce que voit le client** : `MobAnim` gagne `Burrowed` (le modèle s'enfonce, un monticule de
+  terre le suit) et `Toppled` (le corps tombe au sol). Les pattes cassées sont un petit composant
+  répliqué (`MobParts { broken }`, un bit par patte) ; le modèle les cache avec le tag
+  `Breakable(i)`. Les positions des pattes viennent d'une seule constante (`BROOD_LEGS`) utilisée
+  par le modèle *et* par les zones : impossible qu'elles se décalent.
+- **Zones au sol télégraphiées** : `HazardKind::Blast` (cercle qui explose après `life` secondes :
+  obus du mortier, gelée de magma, sortie du ver) et des flaques (acide, lave) qui font mal toutes
+  les 0,5 s. Elles sont répliquées une fois ; le client anime l'obus qui tombe à partir du tick de
+  départ, comme les autres zones.
+- **Solo passe par le salon** : il fallait pouvoir choisir ses armes. La partie n'est simplement
+  pas annoncée dans la liste publique (`config.solo`).

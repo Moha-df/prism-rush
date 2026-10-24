@@ -15,6 +15,7 @@
 use bevy::prelude::*;
 
 use super::model::{AnimTag, Part};
+use super::monsters;
 use super::palette::*;
 use crate::net::protocol::{PowerupKind, ProjectileKind, SHRINE_RADIUS};
 use crate::shared::economy::ChestKind;
@@ -90,6 +91,26 @@ pub fn mob(kind: MobKind) -> Part {
         MobKind::StormTitan => storm_titan(),
         MobKind::WhiteGhost => ghost(false),
         MobKind::BlackGhost => ghost(true),
+        MobKind::Flea => monsters::flea(),
+        MobKind::Burrower => monsters::burrower(),
+        MobKind::Scarab => monsters::scarab(),
+        MobKind::ToxicJelly => monsters::toxic_jelly(),
+        MobKind::MagmaJelly => monsters::magma_jelly(),
+        MobKind::MegaJelly => monsters::mega_jelly(),
+        MobKind::Mortar => monsters::mortar(),
+        MobKind::Eye => monsters::eye(),
+        MobKind::Thornback => monsters::thornback(),
+        MobKind::SkyJelly => monsters::sky_jelly(),
+        MobKind::Sporeling => monsters::sporeling(),
+        MobKind::FireBat => monsters::fire_bat(),
+        MobKind::StoneGolem => monsters::stone_golem(),
+        MobKind::CrystalGolem => monsters::crystal_golem(),
+        MobKind::ShieldKnight => monsters::shield_knight(),
+        MobKind::Summoner => monsters::summoner(),
+        MobKind::LavaBoar => monsters::lava_boar(),
+        MobKind::Broodmother => monsters::broodmother(),
+        MobKind::AncientGolem => monsters::ancient_golem(),
+        MobKind::Sandworm => monsters::sandworm(),
     }
 }
 
@@ -481,6 +502,8 @@ fn brute() -> Part {
         .tag(AnimTag::Body)
         .with(Part::cube(2.1, 1.5, 1.3).at(0.0, 0.95, 0.1).rot_x(15.0).color(PLUM))
         .with(Part::cube(1.3, 0.8, 0.2).at(0.0, 0.6, -0.56).color(PLUM_LIGHT))
+        // Weak point: a glowing growth on its back.
+        .with(Part::ico(0.7, 0.8, 0.5).at(0.0, 1.5, 0.75).color(GLOW_ORANGE).glow(4.0).tag(AnimTag::Pulse))
         .with(plate.mirrored_x())
         .with(plate)
         .with(head)
@@ -811,6 +834,8 @@ pub fn projectile(kind: ProjectileKind, size: f32) -> Part {
                 .with(Part::ico(0.25, 0.25, 0.25).at(0.0, 0.1, 0.25).color(GLOW_TOXIC).glow(2.0));
         }
         ProjectileKind::Bolt => return Part::pivot().with(Part::ellipsoid(0.25, 0.25, 0.8).color(GLOW_CYAN).glow(5.0)),
+        ProjectileKind::Thorn => return Part::pivot().with(Part::cone(0.22, 0.8).rot_x(-90.0).color(BONE).glow(1.5)),
+        ProjectileKind::Shard => return Part::pivot().with(Part::ico(0.4, 0.4, 1.0).color(CRYSTAL_PINK).glow(4.0)),
         ProjectileKind::BossOrb => {
             return Part::pivot()
                 .with(Part::sphere(1.0).color(GLOW_ORANGE).glow(5.0))

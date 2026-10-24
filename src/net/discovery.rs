@@ -205,7 +205,7 @@ fn publish_ad(
     info: Query<&MatchInfo>,
     time: Res<Time<Real>>,
 ) {
-    if !role.is_authority() {
+    if !role.is_authority() || config.solo {
         if discovery.publishing {
             discovery.withdraw();
         }

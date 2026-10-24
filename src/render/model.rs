@@ -64,6 +64,9 @@ pub enum AnimTag {
     Recoil,
     /// Light beam above a chest, shrinks away once opened.
     Beam,
+    /// Boss leg that can be broken (bit of `MobParts::broken`): walks like
+    /// an insect leg, disappears when broken.
+    Breakable(u8),
 }
 
 #[derive(Clone, Debug)]

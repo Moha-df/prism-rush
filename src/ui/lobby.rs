@@ -4,6 +4,7 @@ use bevy::prelude::*;
 
 use super::widgets::*;
 use super::AppState;
+use crate::config::AppConfig;
 use crate::net::discovery::Discovery;
 use crate::net::protocol::{player_color, LobbyCommand, Player};
 use crate::net::{NetCommand, NetRole, NetStatus};
@@ -25,10 +26,11 @@ impl Plugin for LobbyUiPlugin {
     }
 }
 
-fn spawn_lobby(mut commands: Commands, role: Res<NetRole>) {
+fn spawn_lobby(mut commands: Commands, role: Res<NetRole>, config: Res<AppConfig>) {
     let is_host = *role == NetRole::Host;
     let root = commands.spawn((DespawnOnExit(AppState::Lobby), screen_root())).id();
-    commands.spawn((Text::new("SALON"), bold(56.0), TextColor(ACCENT), TextShadow::default(), ChildOf(root)));
+    let title = if config.solo { "SOLO" } else { "SALON" };
+    commands.spawn((Text::new(title), bold(56.0), TextColor(ACCENT), TextShadow::default(), ChildOf(root)));
     let p = commands.spawn((panel(), ChildOf(root))).id();
     commands.spawn((label("Joueurs (1 à 4)", 20.0, TEXT_DIM), ChildOf(p)));
     commands.spawn((
@@ -50,7 +52,9 @@ fn spawn_lobby(mut commands: Commands, role: Res<NetRole>) {
     let row = commands.spawn((Node { flex_direction: FlexDirection::Row, ..default() }, ChildOf(p))).id();
     if is_host {
         commands.spawn((button("Lancer la partie", UiAction::Start, 220.0), ChildOf(row)));
-        commands.spawn((button("Copier le code", UiAction::CopyCode, 190.0), ChildOf(row)));
+        if !config.solo {
+            commands.spawn((button("Copier le code", UiAction::CopyCode, 190.0), ChildOf(row)));
+        }
     }
     commands.spawn((button("Quitter", UiAction::Leave, 150.0), ChildOf(row)));
 }
@@ -59,12 +63,15 @@ fn update_online_text(
     role: Res<NetRole>,
     discovery: Res<Discovery>,
     status: Res<NetStatus>,
+    config: Res<AppConfig>,
     time: Res<Time<Real>>,
     mut text: Query<&mut Text, With<OnlineText>>,
 ) {
     let Ok(mut text) = text.single_mut() else { return };
     let dots = ".".repeat((time.elapsed_secs() * 2.0) as usize % 4);
-    let msg = if *role != NetRole::Host {
+    let msg = if config.solo {
+        "Partie solo : choisis tes armes, puis « Lancer la partie ».".to_string()
+    } else if *role != NetRole::Host {
         format!("En attente du lancement par l'hôte{dots}")
     } else if discovery.my_addr.is_none() {
         format!("Mise en ligne de la partie{dots}")
@@ -76,7 +83,7 @@ fn update_online_text(
         "Ta partie est en ligne ! Tes amis la voient dans « Parties ouvertes » de leur menu :\nils cliquent sur Rejoindre, c'est tout. (Ou envoie-leur le code avec « Copier le code ».)"
             .to_string()
     };
-    let msg = match (&status.host_code, *role == NetRole::Host) {
+    let msg = match (&status.host_code, *role == NetRole::Host && !config.solo) {
         (Some(code), true) => format!("{msg}\n\nCode : {code}"),
         _ => msg,
     };

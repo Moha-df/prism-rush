@@ -17,7 +17,7 @@ use super::{ServerSet, SimTick};
 use crate::net::protocol::*;
 use crate::shared::economy::{self, ChestKind};
 use crate::shared::items::PlayerStats;
-use crate::shared::mobs::MobKind;
+use crate::shared::mobs::{self as mobdefs, MobKind, ZoneKind, TOPPLE_TIME};
 use crate::shared::movement::{DT, PLAYER_HEIGHT};
 use crate::shared::build::{Delivery, MainParams};
 use crate::shared::rng::Rng;
@@ -33,6 +33,8 @@ pub struct DamageMob {
     pub pos: Vec3,
     /// Player entity responsible (for kill credit, lifesteal).
     pub by: Option<Entity>,
+    /// Hit zone of a direct hit (weak point, armor, leg); `None` = body or area.
+    pub zone: Option<ZoneKind>,
 }
 
 #[derive(Message, Clone, Copy, Debug)]
@@ -62,12 +64,20 @@ pub struct HealMobs {
     pub fraction: f32,
 }
 
-/// Server data of a boss attack area.
-#[derive(Component, Debug)]
+/// Server data of a monster attack area.
+#[derive(Component, Debug, Default)]
 pub struct HazardServer {
     pub damage: f32,
     /// Players already hit (a shockwave hits each player once).
     pub hit: Vec<Entity>,
+    /// Pools: time until they hurt again.
+    pub next_pulse: f32,
+}
+
+impl HazardServer {
+    pub fn new(damage: f32) -> Self {
+        Self { damage, ..default() }
+    }
 }
 
 /// Recent positions of a monster, to check hits where the *shooter saw it*.
@@ -168,7 +178,8 @@ impl ProjectileServer {
 }
 
 /// The monster query shared by the combat systems.
-type MobQuery<'w, 's> = Query<'w, 's, (Entity, &'static Mob, &'static MobState, &'static MobHistory, &'static Health)>;
+type MobQuery<'w, 's> =
+    Query<'w, 's, (Entity, &'static Mob, &'static MobState, &'static MobHistory, Option<&'static MobParts>, &'static Health)>;
 
 fn mob_center(mob: &Mob, state: &MobState) -> Vec3 {
     state.pos + Vec3::Y * mob.kind.def().height * 0.5
@@ -202,7 +213,7 @@ fn item_procs(
             .collect();
         others.sort_by(|a, b| a.1.distance(at).total_cmp(&b.1.distance(at)));
         for (e, pos) in others.into_iter().take(2) {
-            damage.write(DamageMob { target: e, amount: base * 0.6, crit: false, pos, by: Some(by) });
+            damage.write(DamageMob { target: e, amount: base * 0.6, crit: false, pos, by: Some(by), zone: None });
             fx.write(ToClients { targets: SendTargets::All, message: Fx::Arc { from: at, to: pos } });
         }
     }
@@ -259,10 +270,82 @@ pub fn ray_capsule(origin: Vec3, dir: Vec3, a: Vec3, b: Vec3, r: f32) -> Option<
 }
 
 /// Hit volume of a monster whose feet are at `pos`.
+#[cfg(test)]
 fn mob_capsule(kind: MobKind, pos: Vec3) -> (Vec3, Vec3, f32) {
+    capsule_squashed(kind, pos, 1.0)
+}
+
+fn capsule_squashed(kind: MobKind, pos: Vec3, squash: f32) -> (Vec3, Vec3, f32) {
     let d = kind.def();
-    let r = d.radius.min(d.height * 0.5);
-    (pos + Vec3::Y * r, pos + Vec3::Y * (d.height - r).max(r), r)
+    let h = d.height * squash;
+    let r = d.radius.min(h * 0.5);
+    (pos + Vec3::Y * r, pos + Vec3::Y * (h - r).max(r), r)
+}
+
+/// Where to aim at a monster (bots): a leg still standing, else a weak
+/// point visible from the front, else the middle of the body.
+pub fn aim_point(mob: &Mob, state: &MobState, parts: Option<&MobParts>) -> Vec3 {
+    let broken = parts.map(|p| p.broken).unwrap_or(0);
+    let toppled = state.anim == MobAnim::Toppled;
+    let squash = if toppled { mob.kind.topple_squash() } else { 1.0 };
+    let usable = |z: &&mobdefs::HitZone| match z.kind {
+        ZoneKind::Leg(i) => !toppled && broken & (1 << i) == 0,
+        ZoneKind::Weak(_) => z.offset.z <= 0.0,
+        ZoneKind::Armor(_) => false,
+    };
+    match mob.kind.zones().iter().find(usable) {
+        Some(z) => mobdefs::zone_center(z, state.pos, state.yaw, squash),
+        None => state.pos + Vec3::Y * mob.kind.def().height * squash * 0.5,
+    }
+}
+
+/// A zone counts if the ray enters it at most this much after the body:
+/// weak points are a bit forgiving.
+const ZONE_SLACK: f32 = 0.3;
+
+/// Direct hit test against a monster at `pos`: its body capsule and its hit
+/// zones (weak points, shields, legs). Returns the distance along the ray
+/// (`dir` is a unit vector) and the zone hit (`None` = the body).
+/// Burrowed monsters cannot be hit.
+pub fn ray_mob(
+    mob: &Mob,
+    state: &MobState,
+    parts: Option<&MobParts>,
+    pos: Vec3,
+    origin: Vec3,
+    dir: Vec3,
+    pad: f32,
+) -> Option<(f32, Option<ZoneKind>)> {
+    if state.anim == MobAnim::Burrowed {
+        return None;
+    }
+    let toppled = state.anim == MobAnim::Toppled;
+    let squash = if toppled { mob.kind.topple_squash() } else { 1.0 };
+    // Elites are drawn 1.3x bigger: their zones follow.
+    let scale = if mob.elite { 1.3 } else { 1.0 };
+    let (a, b, r) = capsule_squashed(mob.kind, pos, squash);
+    let body = ray_capsule(origin, dir, a, b, r + pad);
+    let broken = parts.map(|p| p.broken).unwrap_or(0);
+    let mut best: Option<(f32, ZoneKind)> = None;
+    for z in mob.kind.zones() {
+        if let ZoneKind::Leg(i) = z.kind
+            && (toppled || broken & (1 << i) != 0)
+        {
+            continue;
+        }
+        let center = pos + mobdefs::zone_center(z, Vec3::ZERO, state.yaw, squash) * scale;
+        if let Some(t) = mobdefs::ray_sphere(origin, dir, center, z.radius * scale + pad)
+            && best.is_none_or(|(bt, _)| t < bt)
+        {
+            best = Some((t, z.kind));
+        }
+    }
+    match (body, best) {
+        (Some(bt), Some((zt, kind))) if zt <= bt + ZONE_SLACK => Some((zt, Some(kind))),
+        (Some(bt), _) => Some((bt, None)),
+        (None, Some((zt, kind))) => Some((zt, Some(kind))),
+        (None, None) => None,
+    }
 }
 
 /// Turns the volleys fired this tick into projectiles, beams and chains.
@@ -326,15 +409,15 @@ fn resolve_shots(
                     targets: others,
                     message: Fx::Tracer { slot: p.slot, weapon: prm.kind, from: shot.origin, to: shot.origin + shot.dir * wall, size: prm.size },
                 });
-                for (entity, mob, state, history, _) in &mobs {
-                    let (a, b, r) = mob_capsule(mob.kind, history.at(view_tick, state.pos));
-                    if let Some(t) = ray_capsule(shot.origin, shot.dir, a, b, r + prm.size * 0.5)
+                for (entity, mob, state, history, parts, _) in &mobs {
+                    let at = history.at(view_tick, state.pos);
+                    if let Some((t, zone)) = ray_mob(mob, state, parts, at, shot.origin, shot.dir, prm.size * 0.5)
                         && t < wall
                     {
                         let pos = shot.origin + shot.dir * t;
                         let (amount, crit) = roll_hit(prm.damage, prm.crit_chance, prm.crit_mult, &mut rng);
                         let amount = amount * stats.conditional_damage(own_health, health_of(entity));
-                        damage.write(DamageMob { target: entity, amount, crit, pos, by: Some(p.shooter) });
+                        damage.write(DamageMob { target: entity, amount, crit, pos, by: Some(p.shooter), zone });
                     }
                 }
             }
@@ -344,7 +427,10 @@ fn resolve_shots(
                 // First target: on the aim line, or the monster closest to it
                 // (a little aim assist: lightning "seeks" its target).
                 let mut first: Option<(Entity, f32)> = None;
-                for (entity, mob, state, history, _) in &mobs {
+                for (entity, mob, state, history, parts, _) in &mobs {
+                    if state.anim == MobAnim::Burrowed {
+                        continue;
+                    }
                     let pos = history.at(view_tick, state.pos);
                     let center = pos + Vec3::Y * mob.kind.def().height * 0.5;
                     let to = center - shot.origin;
@@ -353,8 +439,7 @@ fn resolve_shots(
                         continue;
                     }
                     let angle = to.angle_between(shot.dir);
-                    let (a, b, r) = mob_capsule(mob.kind, pos);
-                    let on_line = ray_capsule(shot.origin, shot.dir, a, b, r + prm.size * 0.4).is_some();
+                    let on_line = ray_mob(mob, state, parts, pos, shot.origin, shot.dir, prm.size * 0.4).is_some();
                     let score = if on_line { 0.0 } else { angle };
                     if (on_line || angle < 0.14) && first.is_none_or(|(_, s)| score < s) {
                         first = Some((entity, score));
@@ -374,7 +459,7 @@ fn resolve_shots(
                     fx.write(ToClients { targets: SendTargets::All, message: Fx::Arc { from, to: at } });
                     let (amount, crit) = roll_hit(prm.damage, prm.crit_chance, prm.crit_mult, &mut rng);
                     let amount = amount * stats.conditional_damage(own_health, health_of(target));
-                    damage.write(DamageMob { target, amount, crit, pos: at, by: Some(p.shooter) });
+                    damage.write(DamageMob { target, amount, crit, pos: at, by: Some(p.shooter), zone: None });
                     if jump == 0 {
                         item_procs(&stats, &mut rng, target, at, prm.damage, p.shooter, &mobs, &mut damage, &mut explode, &mut fx);
                     }
@@ -463,12 +548,13 @@ fn update_projectiles(
         let seg = pos - prev;
         let len = seg.length();
         let dir = if len > 1e-4 { seg / len } else { Vec3::Y };
-        let mut hits: Vec<(f32, Entity)> = mobs
+        let mut hits: Vec<(f32, Entity, Option<ZoneKind>)> = mobs
             .iter()
             .filter(|(e, ..)| !data.hit.contains(e))
-            .filter_map(|(e, mob, state, ..)| {
-                let (a, b, r) = mob_capsule(mob.kind, state.pos);
-                ray_capsule(prev, dir, a, b, r + proj.size).filter(|t| *t <= len.max(proj.size)).map(|t| (t, e))
+            .filter_map(|(e, mob, state, _, parts, _)| {
+                ray_mob(mob, state, parts, state.pos, prev, dir, proj.size)
+                    .filter(|(t, _)| *t <= len.max(proj.size))
+                    .map(|(t, zone)| (t, e, zone))
             })
             .collect();
         hits.sort_by(|a, b| a.0.total_cmp(&b.0));
@@ -479,7 +565,7 @@ fn update_projectiles(
         let own_health = shooter.map(|(_, h)| h.hp / h.max.max(1.0)).unwrap_or(1.0);
         let mut rng = Rng::new(data.seed ^ u64::from(tick.0));
         let mut done = false;
-        for (t, target) in hits {
+        for (t, target, zone) in hits {
             let at = prev + dir * t;
             data.hit.push(target);
             if data.splash > 0.0 {
@@ -490,7 +576,7 @@ fn update_projectiles(
             let target_health = mobs.get(target).map(|(.., h)| h.hp / h.max.max(1.0)).unwrap_or(1.0);
             let (amount, crit) = roll_hit(data.damage, data.crit_chance, data.crit_mult, &mut rng);
             let amount = amount * stats.map(|s| s.conditional_damage(own_health, target_health)).unwrap_or(1.0);
-            damage_mob.write(DamageMob { target, amount, crit, pos: at, by });
+            damage_mob.write(DamageMob { target, amount, crit, pos: at, by, zone });
             if let (Some(s), Some(b)) = (stats.as_ref(), by) {
                 item_procs(s, &mut rng, target, at, data.damage, b, &mobs, &mut damage_mob, &mut explode, &mut fx);
             }
@@ -569,6 +655,37 @@ fn update_hazards(
                     }
                 }
             }
+            HazardKind::Blast => {
+                if age >= hazard.life {
+                    explode.write(Explode {
+                        pos: hazard.pos + Vec3::Y * 0.5,
+                        radius: hazard.radius,
+                        damage: data.damage,
+                        hurts_players: true,
+                        hurts_mobs: false,
+                        by: None,
+                    });
+                    commands.entity(entity).try_despawn();
+                }
+            }
+            HazardKind::AcidPool | HazardKind::LavaPool => {
+                if age >= hazard.life {
+                    commands.entity(entity).try_despawn();
+                    continue;
+                }
+                data.next_pulse -= DT;
+                if data.next_pulse > 0.0 {
+                    continue;
+                }
+                data.next_pulse = 0.5;
+                for (pe, ps, health) in &players {
+                    let p = ps.sim.mv.pos;
+                    let d = Vec2::new(p.x - hazard.pos.x, p.z - hazard.pos.z).length();
+                    if !health.downed && d < hazard.radius && (p.y - hazard.pos.y).abs() < 2.0 {
+                        damage.write(DamagePlayer { target: pe, amount: data.damage, attacker: None });
+                    }
+                }
+            }
             HazardKind::Lightning => {
                 if age >= LIGHTNING_DELAY {
                     explode.write(Explode {
@@ -611,6 +728,9 @@ fn apply_explosions(
         let scale = |d: f32| 1.0 - 0.7 * (d / ex.radius).clamp(0.0, 1.0);
         if ex.hurts_mobs {
             for (entity, mob, state) in &mobs {
+                if state.anim == MobAnim::Burrowed {
+                    continue;
+                }
                 let center = state.pos + Vec3::Y * mob.kind.def().height * 0.5;
                 let d = (center - ex.pos).length() - mob.kind.def().radius;
                 if d < ex.radius {
@@ -620,6 +740,7 @@ fn apply_explosions(
                         crit: false,
                         pos: center,
                         by: ex.by,
+                        zone: None,
                     });
                 }
             }
@@ -642,7 +763,7 @@ fn apply_explosions(
 fn apply_mob_damage(
     mut hits: MessageReader<DamageMob>,
     mut commands: Commands,
-    mut mobs: Query<(&Mob, &mut Health, &MobState), Without<Player>>,
+    mut mobs: Query<(&Mob, &mut Health, &MobState, &mut super::mobs::MobAi, Option<&mut MobParts>), Without<Player>>,
     mut players: Query<(&Player, &mut Health, &mut Wallet, &Items, &mut PlayerScore, &mut PlayerState), Without<Mob>>,
     mut info: Single<&mut MatchInfo>,
     tick: Res<SimTick>,
@@ -652,12 +773,43 @@ fn apply_mob_damage(
 ) {
     let gem_count = gems.iter().count();
     for hit in hits.read() {
-        let Ok((mob, mut health, mob_state)) = mobs.get_mut(hit.target) else { continue };
-        if health.hp <= 0.0 {
-            continue; // already dead this tick
+        let Ok((mob, mut health, mob_state, mut ai, parts)) = mobs.get_mut(hit.target) else { continue };
+        if health.hp <= 0.0 || mob_state.anim == MobAnim::Burrowed {
+            continue; // already dead this tick, or underground
         }
-        let dealt = hit.amount.min(health.hp);
-        health.hp -= hit.amount;
+        // Hit zones: weak points, shells and shields, breakable legs.
+        let toppled = mob_state.anim == MobAnim::Toppled;
+        let body = mob.kind.body_mult(toppled);
+        let mult = match hit.zone {
+            None => body,
+            Some(ZoneKind::Weak(m)) => m.max(body),
+            Some(ZoneKind::Armor(m)) => m,
+            Some(ZoneKind::Leg(i)) => {
+                if let Some(mut parts) = parts
+                    && !toppled
+                    && parts.broken & (1 << i) == 0
+                {
+                    let leg = &mut ai.leg_hp[i as usize];
+                    *leg -= hit.amount;
+                    if *leg <= 0.0 {
+                        parts.broken |= 1 << i;
+                        fx.write(ToClients { targets: SendTargets::All, message: Fx::PartBroken { pos: hit.pos } });
+                        if parts.broken == 0b1111 {
+                            // All legs broken: the boss collapses, no resistance left.
+                            ai.down_timer = TOPPLE_TIME;
+                            events.write(ToClients { targets: SendTargets::All, message: GameEvent::BossToppled { kind: mob.kind } });
+                            info!("{:?} toppled!", mob.kind);
+                        }
+                    }
+                }
+                // Hitting a leg still hurts the boss a little.
+                0.4
+            }
+        };
+        let amount = hit.amount * mult;
+        let zone_code = if mult > 1.01 { 1 } else if mult < 0.5 { 2 } else { 0 };
+        let dealt = amount.min(health.hp);
+        health.hp -= amount;
         let killed = health.hp <= 0.0;
 
         let mut by_slot = 255;
@@ -680,7 +832,7 @@ fn apply_mob_damage(
         }
         fx.write(ToClients {
             targets: SendTargets::All,
-            message: Fx::Hit { pos: hit.pos, amount: hit.amount.round() as u16, crit: hit.crit, killed, by_slot },
+            message: Fx::Hit { pos: hit.pos, amount: amount.round() as u16, crit: hit.crit, killed, by_slot, zone: zone_code },
         });
 
         if killed {
@@ -698,13 +850,8 @@ fn apply_mob_damage(
             // XP gem for the team (elites and bosses are worth more).
             let xp = mob.kind.def().gold * if mob.elite { 3.0 } else { 1.0 } * if mob.kind.is_boss() { 5.0 } else { 1.0 };
             crate::game::progress::drop_gem(&mut commands, gem_count, mob_state.pos, xp, &mut info);
-            // A jelly splits into two small ones.
-            if mob.kind == MobKind::Jelly {
-                for side in [-1.0f32, 1.0] {
-                    let pos = mob_state.pos + Vec3::new(side * 0.8, 0.3, 0.0);
-                    crate::game::mobs::spawn_mob(&mut commands, MobKind::Jellet, pos, mob.level, tick.0, side, false);
-                }
-            }
+            // Splits, acid pools, delayed explosions...
+            crate::game::mobs::on_mob_death(&mut commands, mob, mob_state.pos, tick.0);
             if mob.kind.is_boss() {
                 // Bosses leave a legendary chest behind.
                 crate::game::chests::spawn_loot_chest(&mut commands, ChestKind::Legendary, mob_state.pos, u64::from(tick.0));
@@ -745,6 +892,7 @@ fn apply_player_damage(
                 crit: false,
                 pos: state.sim.mv.pos + Vec3::Y,
                 by: None,
+                zone: None,
             });
         }
         // The energy shield absorbs first.
@@ -819,5 +967,41 @@ mod tests {
         assert_eq!(h.at(11, Vec3::ONE), Vec3::new(1.0, 0.0, 0.0));
         assert_eq!(h.at(5, Vec3::ONE), Vec3::ZERO); // before window: oldest
         assert_eq!(h.at(50, Vec3::ONE), Vec3::new(2.0, 0.0, 0.0)); // after: newest
+    }
+
+    fn mob_at(kind: MobKind, yaw: f32, anim: MobAnim) -> (Mob, MobState) {
+        (Mob { kind, level: 1, elite: false }, MobState { pos: Vec3::new(0.0, 0.0, -10.0), yaw, tick: 0, anim })
+    }
+
+    #[test]
+    fn scarab_shell_in_front_soft_back() {
+        // Facing the shooter (yaw PI: it looks toward +Z, where we are).
+        let (m, s) = mob_at(MobKind::Scarab, std::f32::consts::PI, MobAnim::Move);
+        let hit = ray_mob(&m, &s, None, s.pos, Vec3::new(0.0, 0.5, 0.0), Vec3::NEG_Z, 0.1).unwrap();
+        assert!(matches!(hit.1, Some(ZoneKind::Armor(_))));
+        // Turned away (yaw 0: looks toward -Z): we hit its back.
+        let (m, s) = mob_at(MobKind::Scarab, 0.0, MobAnim::Move);
+        let hit = ray_mob(&m, &s, None, s.pos, Vec3::new(0.0, 0.55, 0.0), Vec3::NEG_Z, 0.1).unwrap();
+        assert!(matches!(hit.1, Some(ZoneKind::Weak(_))));
+    }
+
+    #[test]
+    fn burrowed_monsters_cannot_be_hit() {
+        let (m, s) = mob_at(MobKind::Burrower, 0.0, MobAnim::Burrowed);
+        assert!(ray_mob(&m, &s, None, s.pos, Vec3::new(0.0, 0.4, 0.0), Vec3::NEG_Z, 0.5).is_none());
+    }
+
+    #[test]
+    fn broodmother_legs_break_one_by_one() {
+        let (m, s) = mob_at(MobKind::Broodmother, 0.0, MobAnim::Move);
+        let knee = crate::shared::mobs::BROOD_LEGS[0] + s.pos;
+        // From the front (it faces -Z): the front-right knee is the first thing hit.
+        let origin = knee + Vec3::new(0.0, 0.0, -10.0);
+        let hit = ray_mob(&m, &s, None, s.pos, origin, Vec3::Z, 0.1).unwrap();
+        assert_eq!(hit.1, Some(ZoneKind::Leg(0)));
+        // Once broken, the shot goes through where the knee was.
+        let parts = MobParts { broken: 1 };
+        let hit = ray_mob(&m, &s, Some(&parts), s.pos, origin, Vec3::Z, 0.1);
+        assert!(hit.is_none_or(|h| h.1 != Some(ZoneKind::Leg(0))));
     }
 }

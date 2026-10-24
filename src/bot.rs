@@ -303,7 +303,7 @@ struct WorldSnapshot {
 type GoodiesQuery<'w, 's> = Query<'w, 's, (Option<&'static Powerup>, Option<&'static Shrine>, Option<&'static ShrineCharge>)>;
 
 fn snapshot(
-    mobs: &Query<(&Mob, &MobState)>,
+    mobs: &Query<(&Mob, &MobState, Option<&MobParts>)>,
     chests: &Query<(&Chest, &ChestOpen)>,
     players: &Query<(&PlayerState, &Health)>,
     goodies: &GoodiesQuery,
@@ -317,7 +317,7 @@ fn snapshot(
                 _ => None,
             })
             .collect(),
-        mobs: mobs.iter().map(|(m, s)| s.pos + Vec3::Y * m.kind.def().height * 0.5).collect(),
+        mobs: mobs.iter().filter(|(_, s, _)| s.anim != MobAnim::Burrowed).map(|(m, s, p)| crate::game::combat::aim_point(m, s, p)).collect(),
         chests: chests.iter().filter(|(_, o)| !o.opened).map(|(c, _)| (c.pos, c.kind)).collect(),
         downed: players.iter().filter(|(_, h)| h.downed).map(|(s, _)| s.sim.mv.pos).collect(),
     }
@@ -328,7 +328,7 @@ type BotQuery<'a> = (&'a mut BotBrain, &'a PlayerState, &'a Health, &'a Wallet, 
 #[allow(clippy::type_complexity)]
 fn server_bots(
     mut bots: Query<BotQuery, With<Owner>>,
-    mobs: Query<(&Mob, &MobState)>,
+    mobs: Query<(&Mob, &MobState, Option<&MobParts>)>,
     chests: Query<(&Chest, &ChestOpen)>,
     players: Query<(&PlayerState, &Health)>,
     goodies: GoodiesQuery,
@@ -370,7 +370,7 @@ fn bot_client_input(
     mut input: ResMut<InputState>,
     local: Res<LocalPlayer>,
     me: Query<(&Player, &Health, &Wallet)>,
-    mobs: Query<(&Mob, &MobState)>,
+    mobs: Query<(&Mob, &MobState, Option<&MobParts>)>,
     chests: Query<(&Chest, &ChestOpen)>,
     players: Query<(&PlayerState, &Health)>,
     goodies: GoodiesQuery,

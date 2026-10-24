@@ -687,6 +687,15 @@ impl Loadout {
         Self { main, main_up: WeaponLevel::default(), autos: Vec::new() }
     }
 
+    /// Start of a run: the main weapon plus the automatic weapon picked in the lobby.
+    pub fn starting(main: MainWeapon, auto: Option<AutoWeapon>) -> Self {
+        let mut l = Self::new(main);
+        if let Some(a) = auto {
+            l.autos.push((a, WeaponLevel { level: 1, ..Default::default() }));
+        }
+        l
+    }
+
     pub fn has_auto(&self, a: AutoWeapon) -> bool {
         self.autos.iter().any(|(k, _)| *k == a)
     }

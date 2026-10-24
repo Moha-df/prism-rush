@@ -125,13 +125,22 @@ fn rebuild_panel(
         };
         tile(&mut commands, mains, icons.mains.get(&w).cloned().unwrap_or_default(), def.name, status, border, !unlocked, TileAction::Main(w));
     }
-    commands.spawn((label("Armes automatiques (proposées pendant la partie)", 16.0, TEXT_DIM), ChildOf(panel)));
+    commands.spawn((
+        label("Ton arme automatique de départ (les autres débloquées sont proposées pendant la partie)", 16.0, ACCENT),
+        ChildOf(panel),
+    ));
     let autos = row(&mut commands, panel);
     for a in AutoWeapon::ALL {
         let def = a.def();
         let unlocked = config.is_unlocked_auto(a);
-        let status = if unlocked { "Débloquée".to_string() } else { format!("{} argent", def.silver_cost) };
-        let border = if unlocked { Color::srgb(0.35, 0.9, 1.0) } else { LOCKED };
+        let selected = config.start_auto == Some(a);
+        let (status, border) = if selected {
+            ("Choisie".to_string(), GOLD_BORDER)
+        } else if unlocked {
+            ("Choisir".to_string(), Color::srgb(0.35, 0.9, 1.0))
+        } else {
+            (format!("{} argent", def.silver_cost), LOCKED)
+        };
         tile(&mut commands, autos, icons.autos.get(&a).cloned().unwrap_or_default(), def.name, status, border, !unlocked, TileAction::Auto(a));
     }
 }
@@ -156,25 +165,29 @@ fn on_tile_click(
                     config.silver -= cost;
                     config.unlocked_mains.push(w);
                     config.main_weapon = w;
-                        sfx.write(PlaySfx::ui(Sfx::ChestOpen));
-                } else {
-                    sfx.write(PlaySfx::ui(Sfx::Empty));
-                }
-            }
-            TileAction::Auto(a) if !config.is_unlocked_auto(a) => {
-                let cost = a.def().silver_cost;
-                if config.silver >= cost {
-                    config.silver -= cost;
-                    config.unlocked_autos.push(a);
                     sfx.write(PlaySfx::ui(Sfx::ChestOpen));
                 } else {
                     sfx.write(PlaySfx::ui(Sfx::Empty));
                 }
             }
-            TileAction::Auto(_) => {}
+            TileAction::Auto(a) if config.is_unlocked_auto(a) => {
+                config.start_auto = Some(a);
+                sfx.write(PlaySfx::ui(Sfx::Switch));
+            }
+            TileAction::Auto(a) => {
+                let cost = a.def().silver_cost;
+                if config.silver >= cost {
+                    config.silver -= cost;
+                    config.unlocked_autos.push(a);
+                    config.start_auto = Some(a);
+                    sfx.write(PlaySfx::ui(Sfx::ChestOpen));
+                } else {
+                    sfx.write(PlaySfx::ui(Sfx::Empty));
+                }
+            }
         }
         config.save();
-        // Tell the server (our weapon for the next run, our unlocked weapons).
-        pick.write(PickLoadout { main: config.main_weapon, autos: config.auto_pool() });
+        // Tell the server (our weapons for the next run, our unlocked weapons).
+        pick.write(PickLoadout { main: config.main_weapon, start_auto: config.start_auto, autos: config.auto_pool() });
     }
 }

@@ -73,6 +73,14 @@ impl Rng {
         &items[self.range_u32(0, items.len() as u32) as usize]
     }
 
+    /// Shuffles a slice in place (Fisher-Yates).
+    pub fn shuffle<T>(&mut self, items: &mut [T]) {
+        for i in (1..items.len()).rev() {
+            let j = self.range_u32(0, i as u32 + 1) as usize;
+            items.swap(i, j);
+        }
+    }
+
     /// Picks an index according to the given weights (all >= 0, sum > 0).
     pub fn weighted_index(&mut self, weights: &[f32]) -> usize {
         let total: f32 = weights.iter().sum();

@@ -162,6 +162,7 @@ fn main() {
         Command::Solo { bots } => {
             config.bots = bots;
             config.autostart = true;
+            config.solo = true;
             LaunchMode::Host
         }
         Command::Server { headless, bots, autostart, seed } => {

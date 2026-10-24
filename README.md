@@ -117,8 +117,8 @@ Il n'y a **pas de fin** : le but est de **survivre le plus longtemps possible**.
 - Les monstres lâchent des **gemmes d'XP** bleues. Passe près d'elles pour les ramasser.
   L'XP va à **toute l'équipe** : vous montez de niveau ensemble.
 - À chaque **niveau**, chaque joueur choisit **1 carte parmi 3** (pas de pause, le jeu continue).
-- **Boss** à 4:00, 8:00 et 12:00 (Colosse, Reine de la ruche, Titan de foudre). Chaque boss lâche
-  un coffre légendaire.
+- **Boss** à 4:00, 8:00 et 12:00, tirés au sort parmi 6 à chaque partie. Chaque boss lâche un
+  coffre légendaire.
 - **15:00 : l'Essaim final.** Des **fantômes blancs** traversent tout et foncent sur vous.
 - **20:00 : les fantômes noirs** arrivent. Les fantômes deviennent **plus rapides, plus résistants
   et plus forts chaque minute**, sans limite : au bout d'un moment, c'est impossible. Combien de
@@ -126,8 +126,11 @@ Il n'y a **pas de fin** : le but est de **survivre le plus longtemps possible**.
 
 ### Deux catégories d'armes
 
-**1. L'arme principale : c'est toi qui vises et qui tires.** Tu la choisis dans le salon avant la
-partie. Pas de munitions : maintiens le clic gauche, elle tire à sa cadence.
+**Avant la partie** (salon, y compris en **Solo**), tu choisis ton **arme principale** et ton
+**arme automatique de départ** parmi celles que tu as débloquées.
+
+**1. L'arme principale : c'est toi qui vises et qui tires.** Pas de munitions : maintiens le clic
+gauche, elle tire à sa cadence.
 
 | Arme | Style | Prix |
 |---|---|---|
@@ -143,8 +146,8 @@ partie. Pas de munitions : maintiens le clic gauche, elle tire à sa cadence.
 Ses améliorations changent ses projectiles : **plus de projectiles**, plus rapides, plus gros,
 plus de rebonds, plus de dégâts, de cadence ou de critiques.
 
-**2. Les armes automatiques (3 maximum) : elles agissent toutes seules.** On les obtient avec les
-cartes de niveau, puis on les améliore.
+**2. Les armes automatiques (3 maximum) : elles agissent toutes seules.** Tu commences avec celle
+choisie au salon ; les autres arrivent avec les cartes de niveau, puis on les améliore.
 
 | Arme | Effet | Prix |
 |---|---|---|
@@ -201,20 +204,37 @@ déblocages sont enregistrés sur ton PC (`settings.txt`).
 
 ### Monstres
 
-| Monstre | Rôle |
+**Chaque partie a ses propres monstres.** Il y a 34 monstres répartis par **rôle** (petits rapides,
+gelées, tireurs, kamikazes, tanks, soutiens, chargeurs, boss) et par **moment de la partie**
+(début, milieu, fin). À chaque partie, le jeu tire au sort quelques monstres de chaque rôle : une
+fois ce seront des araignées et des scarabées, une autre fois des puces et des fouisseurs. La
+première fois qu'un monstre apparaît, un message rappelle ce qu'il fait.
+
+**Points faibles** : ce qui **brille** (orange, rose, cyan) sur un gros monstre est un point
+faible : les dégâts y sont **×2 ou ×3** (chiffre orange). Les carapaces et boucliers renvoient les
+balles (chiffre gris, -75 à -90 %) : contourne-les.
+
+| Rôle | Monstres | Ce qu'il faut savoir |
+|---|---|---|
+| Petits rapides | Trotteur, **Puce sauteuse**, **Fouisseur**, **Scarabée blindé** | la puce bondit de loin ; le fouisseur est **invulnérable sous terre** (vise-le quand il sort) ; le scarabée a une carapace devant, **dos ×2** |
+| Gelées | Gelée, **Gelée toxique**, **Gelée de magma**, **Gelée géante** | se divisent, laissent une **flaque d'acide**, ou **explosent une seconde après leur mort** (recule !) |
+| Tireurs | Cracheur, Feu follet, **Crabe mortier**, **Œil sentinelle**, **Hérisson épineux**, **Méduse céleste** | le mortier vise un **cercle au sol** (sors-en) ; l'œil **charge un laser** puis tire là où tu étais (bouge !), pupille ×2 ; le hérisson tire un **anneau d'épines** ; la méduse lâche de l'acide d'au-dessus |
+| Kamikazes | Bombeur, **Champignon explosif**, **Chauve-souris de feu** | le champignon éclate en **nuage toxique**, même si tu le tues de près |
+| Tanks | Brute (dos ×2), **Golem de pierre** (noyau dans le dos ×3), **Golem de cristal** (tête ×2,5, tire des éclats), **Chevalier au bouclier** (bouclier -90 %, tête ×2) | à plusieurs, l'un attire pendant que les autres tirent dans le dos |
+| Soutiens | Chaman (soigne), **Invocateur** (invoque des puces, lanterne ×2) | à abattre en premier |
+| Chargeurs | Chargeur, **Sanglier de lave** (laisse de la lave en chargeant) | écarte-toi de sa ligne |
+| Essaim final | Fantôme blanc / noir | traversent les murs, de plus en plus forts |
+
+**Boss** (3 par partie, tirés au sort parmi 6) :
+
+| Boss | Comment le battre |
 |---|---|
-| Trotteur | Araignée rapide en meute |
-| Gelée | Se divise en deux petites gelées à sa mort |
-| Cracheur | Plante-canon qui tire de l'acide en cloche |
-| Feu follet | Orbe volant qui tire des éclairs |
-| Chargeur | Rhinocéros de cristal : il gratte le sol puis **fonce en ligne droite**, écarte-toi ! |
-| Bombeur | Bombe sur pattes qui explose au contact |
-| Chaman | Masque flottant qui **soigne** les autres monstres : à abattre en premier |
-| Brute | Tank qui frappe le sol |
-| **Fantôme blanc / noir** | L'Essaim final : traverse les murs, de plus en plus fort |
-| **Colosse** (boss) | Frappe au sol et salves de projectiles |
-| **Reine de la ruche** (boss) | Vole, invoque des essaims, tire des éventails d'éclairs |
-| **Titan de foudre** (boss) | Ondes de choc au sol (**saute** !) et foudre annoncée par un cercle |
+| Colosse | frappe au sol et salves ; **cœur rose ×2** |
+| Reine de la ruche | vole et invoque des essaims ; **abdomen ×2** |
+| Titan de foudre | ondes de choc (**saute** !) et foudre annoncée ; **cristal du torse ×2** |
+| **Mère-araignée** | presque invulnérable debout (-80 %). Tire sur ses **4 genoux lumineux** : quand les 4 pattes sont cassées, elle **s'effondre** 7 secondes et prend **×2**. Puis ses pattes repoussent. |
+| **Golem ancien** | blindé (-70 %), **noyau cyan dans le dos ×3**. Après sa frappe au sol, il **s'agenouille** quelques secondes : c'est le moment de le contourner. |
+| **Ver des sables** | **invulnérable sous terre**. Un cercle orange apparaît sous toi : il **surgit** là ! Ensuite il reste dehors quelques secondes : **gueule ×2,5**. |
 
 Les monstres montent de niveau avec le temps, et les **élites** (auréole dorée) arrivent de plus en
 plus souvent. Tous les monstres **télégraphient** leurs attaques : regarde-les pour esquiver.
@@ -229,7 +249,7 @@ Un coéquipier te relève en maintenant E près de toi. Si tout le monde est à 
 ## 5. Pour les curieux / développeurs
 
 ```bash
-cargo test --lib                     # 81 tests : monde déterministe, mouvement, armes, économie, réseau...
+cargo test --lib                     # 90 tests : monde déterministe, mouvement, armes, économie, réseau...
 cargo clippy --all-targets           # aucun avertissement
 cargo run --release -- server --headless --bots 3 --autostart --duration 120   # partie sans fenêtre
 cargo run --release -- bot                                                     # client bot : rejoint la 1re partie de la liste

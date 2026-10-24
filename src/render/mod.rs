@@ -11,6 +11,7 @@ pub mod fx;
 pub mod icons;
 pub mod model;
 pub mod models;
+pub mod monsters;
 pub mod palette;
 pub mod terrain;
 pub mod viewmodel;

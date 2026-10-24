@@ -105,7 +105,7 @@ fn run_autos(
                         let hit_recently = st.orb_hits.get(e).is_some_and(|t| clock - t < ORB_HIT_COOLDOWN);
                         if !hit_recently && orb.distance(*c) < r + ORB_RADIUS + 0.3 {
                             st.orb_hits.insert(*e, clock);
-                            damage.write(DamageMob { target: *e, amount: p.damage, crit: false, pos: orb, by: Some(entity) });
+                            damage.write(DamageMob { target: *e, amount: p.damage, crit: false, pos: orb, by: Some(entity), zone: None });
                         }
                     }
                 }
@@ -156,7 +156,7 @@ fn fire_auto(
             for (e, c, r) in near {
                 let flat = Vec2::new(c.x - me.x, c.z - me.z).length();
                 if flat < p.size + r && (c.y - me.y).abs() < 3.0 {
-                    damage.write(DamageMob { target: *e, amount: p.damage, crit: false, pos: *c, by: Some(by) });
+                    damage.write(DamageMob { target: *e, amount: p.damage, crit: false, pos: *c, by: Some(by), zone: None });
                     any = true;
                 }
             }
@@ -174,7 +174,7 @@ fn fire_auto(
                 let pos = Vec3::new(target.x, ground(target.x, target.z), target.z);
                 for (e, c, r) in near {
                     if c.distance(target) < p.size + r {
-                        damage.write(DamageMob { target: *e, amount: p.damage, crit: false, pos: *c, by: Some(by) });
+                        damage.write(DamageMob { target: *e, amount: p.damage, crit: false, pos: *c, by: Some(by), zone: None });
                     }
                 }
                 fx.write(ToClients { targets: SendTargets::All, message: Fx::Lightning { pos } });
@@ -303,7 +303,7 @@ fn update_player_hazards(
             let h = s.pos.y - pos.y;
             if d < hazard.radius + m.kind.def().radius && h > -1.5 && h < 4.0 {
                 let center = s.pos + Vec3::Y * m.kind.def().height * 0.5;
-                damage.write(DamageMob { target: e, amount: data.damage, crit: false, pos: center, by: Some(data.by) });
+                damage.write(DamageMob { target: e, amount: data.damage, crit: false, pos: center, by: Some(data.by), zone: None });
             }
         }
     }

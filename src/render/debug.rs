@@ -28,6 +28,7 @@ fn demo_scene(
     time: Res<Time<Real>>,
     mut done: Local<bool>,
     role: Res<crate::net::NetRole>,
+    input: Res<crate::net::client::InputState>,
     mut players: Query<(
         Entity,
         &crate::net::protocol::Player,
@@ -44,7 +45,8 @@ fn demo_scene(
     let Some((entity, _, state, mut items, mut gear)) = players.iter_mut().find(|(_, p, ..)| p.slot == 0) else { return };
     *done = true;
     // Show the automatic weapons.
-    for a in [AutoWeapon::Aura, AutoWeapon::Orbs, AutoWeapon::Lightning] {
+    let gallery_mode = std::env::var("PRISM_GALLERY").is_ok();
+    for a in [AutoWeapon::Aura, AutoWeapon::Orbs, AutoWeapon::Lightning].into_iter().filter(|_| !gallery_mode) {
         if !gear.0.has_auto(a) {
             gear.0.autos.push((a, WeaponLevel { level: 1, ..Default::default() }));
         }
@@ -52,14 +54,41 @@ fn demo_scene(
     for item in [ItemKind::FrogLegs, ItemKind::FrogLegs, ItemKind::Jetpack, ItemKind::VampireFangs, ItemKind::Crown, ItemKind::TeslaCoil] {
         items.0.add(item);
     }
-    let forward = Vec3::new(-state.yaw.sin(), 0.0, -state.yaw.cos());
+    // In front of the camera (the local view direction).
+    let forward = Vec3::new(-input.yaw.sin(), 0.0, -input.yaw.cos());
     let right = Vec3::new(forward.z, 0.0, -forward.x);
     // Gallery of the new V2 monsters (one elite) + a statue + a shockwave.
     use crate::shared::mobs::MobKind;
-    let gallery = [MobKind::Charger, MobKind::Jelly, MobKind::Shaman, MobKind::HiveQueen, MobKind::StormTitan];
+    // PRISM_GALLERY=1..4 shows the V4 monsters instead.
+    use MobKind::*;
+    let gallery: Vec<MobKind> = match std::env::var("PRISM_GALLERY").as_deref() {
+        Ok("1") => vec![Flea, Scarab, ToxicJelly, MagmaJelly, MegaJelly, Mortar],
+        Ok("2") => vec![Eye, Thornback, SkyJelly, Sporeling, FireBat, StoneGolem],
+        Ok("3") => vec![CrystalGolem, ShieldKnight, Summoner, LavaBoar, Burrower],
+        Ok("4") => vec![Broodmother, AncientGolem],
+        Ok("5") => vec![Sandworm, Colossus],
+        Ok("6") => vec![Broodmother],
+        _ => vec![Charger, Jelly, Shaman, HiveQueen, StormTitan],
+    };
+    let (spacing, dist) = match (gallery.len(), gallery_mode) {
+        (..=2, true) => (16.0, 22.0),
+        (_, true) => (3.6, 10.0),
+        _ => (7.0, 22.0),
+    };
+    let half = (gallery.len() as f32 - 1.0) * 0.5;
     for (i, kind) in gallery.iter().enumerate() {
-        let p = state.sim.mv.pos + forward * 22.0 + right * ((i as f32 - 2.0) * 7.0) + Vec3::Y * if kind.def().flying { 3.0 } else { 0.3 };
-        crate::game::mobs::spawn_mob(&mut commands, *kind, p, 1, 0, 0.0, i == 0);
+        let p = state.sim.mv.pos + forward * dist + right * ((i as f32 - half) * spacing) + Vec3::Y * if kind.def().flying { 3.0 } else { 0.3 };
+        let e = crate::game::mobs::spawn_mob(&mut commands, *kind, p, 1, 0, 0.0, i == 0 && !gallery_mode);
+        if gallery_mode {
+            commands.entity(e).insert(crate::game::mobs::Frozen);
+            if *kind == Broodmother {
+                // Two legs already broken, to check they disappear.
+                commands.entity(e).insert(crate::net::protocol::MobParts { broken: 0b0101 });
+            }
+        }
+    }
+    if gallery_mode {
+        return;
     }
     commands.spawn((
         bevy_replicon::prelude::Replicated,
@@ -99,7 +128,9 @@ fn auto_screenshots(
 ) {
     let Some(dir) = &config.shots else { return };
     let t = time.elapsed_secs();
-    if let Some(&at) = SHOT_TIMES.get(*next) {
+    // The monster gallery only needs the first shots.
+    let count = if std::env::var("PRISM_GALLERY").is_ok() && !config.autopilot { 2 } else { SHOT_TIMES.len() };
+    if let Some(&at) = SHOT_TIMES[..count].get(*next) {
         if t >= at {
             let _ = std::fs::create_dir_all(dir);
             let path = format!("{dir}/shot_{:02}.png", *next);
@@ -107,7 +138,7 @@ fn auto_screenshots(
             commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path));
             *next += 1;
         }
-    } else if t > SHOT_TIMES[SHOT_TIMES.len() - 1] + 2.0 {
+    } else if t > SHOT_TIMES[count - 1] + 2.0 {
         exit.write(AppExit::Success);
     }
 }

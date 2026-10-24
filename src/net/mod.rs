@@ -368,6 +368,7 @@ fn send_hello(mut hello: MessageWriter<Hello>, config: Res<AppConfig>) {
         name: config.name.clone(),
         version: PROTOCOL_VERSION,
         main: config.main_weapon,
+        start_auto: config.start_auto,
         autos: config.auto_pool(),
     });
 }

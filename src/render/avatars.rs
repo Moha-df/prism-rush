@@ -5,9 +5,10 @@ use bevy::prelude::*;
 
 use super::model::{spawn_model, AnimTag, Part, PrimCache};
 use super::palette;
-use super::models;
+use super::{models, monsters as models_v4};
 use crate::net::interp::LocalAvatar;
 use crate::net::protocol::*;
+use crate::shared::mobs::MobKind;
 
 /// The entity already has its visual model.
 #[derive(Component)]
@@ -37,6 +38,11 @@ pub struct AnimState {
     /// Weapon recoil kick, 0..1 (view model).
     pub recoil: f32,
     pub last_pos: Option<Vec3>,
+    /// Broken legs (bosses).
+    pub broken: u8,
+    /// How deep the model sinks when burrowed, and how far it is, 0..1.
+    pub sink: f32,
+    pub burrow: f32,
 }
 
 impl AnimState {
@@ -60,6 +66,7 @@ impl Plugin for AvatarsPlugin {
                 dim_used_statues,
                 hit_pop,
                 fill_shrines,
+                show_mounds,
             )
                 .chain(),
         );
@@ -71,6 +78,7 @@ impl Plugin for AvatarsPlugin {
 fn grow_shockwaves(
     clock: Res<crate::net::client::ServerClock>,
     hazards: Query<(&Hazard, &HasModel)>,
+    children: Query<&Children>,
     mut models: Query<&mut Transform, Without<HasModel>>,
 ) {
     for (h, has) in &hazards {
@@ -78,6 +86,16 @@ fn grow_shockwaves(
             // Tornados wander: move the model along their path.
             if let Ok(mut t) = models.get_mut(has.model) {
                 t.translation = h.pos_at(clock.estimate) - h.pos;
+            }
+            continue;
+        }
+        if h.kind == HazardKind::Blast {
+            let k = (h.age(clock.estimate) / h.life.max(0.1)).min(1.0);
+            if let Ok(children) = children.get(has.model)
+                && let Some(shell) = children.iter().nth(3)
+                && let Ok(mut t) = models.get_mut(shell)
+            {
+                t.translation.y = (1.0 - k) * 25.0;
             }
             continue;
         }
@@ -106,6 +124,18 @@ fn hit_pop(
         }
         if pop.0 <= 0.0 {
             commands.entity(e).remove::<HitPop>();
+        }
+    }
+}
+
+/// Dirt mound of a burrowing monster (visible while it is underground).
+#[derive(Component)]
+struct BurrowMound;
+
+fn show_mounds(states: Query<&AnimState>, mut mounds: Query<(&ChildOf, &mut Transform), With<BurrowMound>>) {
+    for (parent, mut t) in &mut mounds {
+        if let Ok(st) = states.get(parent.parent()) {
+            t.scale = Vec3::splat(st.burrow.max(0.001));
         }
     }
 }
@@ -176,6 +206,7 @@ fn attach_models(
     for (e, p) in &players {
         attach(&mut commands, e, models::player(player_color(p.slot)), 1.4);
     }
+    let mut burrowers = Vec::new();
     for (e, m) in &mobs {
         let def = m.kind.def();
         let model = if m.elite {
@@ -187,6 +218,9 @@ fn attach_models(
             models::mob(m.kind)
         };
         attach(&mut commands, e, model, (def.height * 0.6).max(0.8));
+        if matches!(m.kind, MobKind::Burrower | MobKind::Sandworm) {
+            burrowers.push((e, def.radius, def.height));
+        }
     }
     for (e, s) in &statues {
         attach(&mut commands, e, models::statue(s.boss), 1.0);
@@ -230,6 +264,30 @@ fn attach_models(
                     .color(if i % 2 == 0 { palette::GLOW_ORANGE } else { Color::srgb(1.0, 0.85, 0.3) })
                     .glow(5.0)
             })),
+            // Marked circle (pulsing) + a shell falling on it.
+            HazardKind::Blast => {
+                let d = h.radius * 2.0;
+                Part::pivot()
+                    .with(Part::cylinder(d, 0.05).color(palette::GLOW_ORANGE).glow(1.5).tag(AnimTag::Pulse))
+                    .with(Part::torus(d, 0.18).color(palette::GLOW_ORANGE).glow(5.0))
+                    .with(Part::torus(d * 0.35, 0.12).color(palette::GLOW_ORANGE).glow(4.0))
+                    .with(Part::pivot().with(Part::sphere(0.8).color(palette::STONE_DARK)).with(Part::ico(0.4, 0.4, 0.4).at(0.0, 0.4, 0.0).color(palette::GLOW_ORANGE).glow(5.0)))
+            }
+            HazardKind::AcidPool | HazardKind::LavaPool => {
+                let d = h.radius * 2.0;
+                let (main, bright) = if h.kind == HazardKind::AcidPool {
+                    (Color::srgb(0.35, 0.8, 0.1), palette::GLOW_TOXIC)
+                } else {
+                    (Color::srgb(0.9, 0.25, 0.05), palette::GLOW_ORANGE)
+                };
+                Part::pivot()
+                    .with(Part::cylinder(d, 0.05).at(0.0, 0.03, 0.0).color(main).glow(2.0))
+                    .with(Part::torus(d, 0.08).color(bright).glow(3.5).tag(AnimTag::Pulse))
+                    .with_all((0..4).map(|i| {
+                        let a = i as f32 * 1.6;
+                        Part::sphere(0.22 * h.radius.max(1.0)).at(a.cos() * h.radius * 0.45, 0.1, a.sin() * h.radius * 0.45).color(bright).glow(4.0).tag(AnimTag::Bob)
+                    }))
+            }
             HazardKind::Tornado => Part::pivot().tag(AnimTag::Spin(9.0)).with_all((0..5).map(|i| {
                 let k = i as f32;
                 Part::frustum(h.radius * (0.5 + 0.3 * k), 0.7)
@@ -245,6 +303,12 @@ fn attach_models(
     }
     for (e, p) in &projectiles {
         attach(&mut commands, e, models::projectile(p.kind, p.size), 1.0);
+    }
+    // A mound of dirt shows where burrowing monsters travel underground.
+    for (e, radius, height) in burrowers {
+        let mound = spawn_child_model(&mut commands, &mut cache, &mut meshes, &mut materials, e, &models_v4::mound(radius));
+        commands.entity(mound).insert(BurrowMound);
+        commands.entity(e).try_insert(AnimState { sink: height * 1.15, ..AnimState::with_stride((height * 0.6).max(0.8)) });
     }
     // The glowing column that fills up as a shrine charges.
     for (e, _) in &shrines {
@@ -309,12 +373,24 @@ pub fn update_anim_states(
         Option<&MobState>,
         Option<&Health>,
         Option<&ChestOpen>,
+        Option<&MobParts>,
         Has<Player>,
     )>,
     mut models: Query<&mut Transform, Without<HasModel>>,
 ) {
     let dt = time.delta_secs().max(1e-4);
-    for (transform, has, mut st, mob, health, chest, is_player) in &mut q {
+    for (transform, has, mut st, mob, health, chest, parts, is_player) in &mut q {
+        st.broken = parts.map(|p| p.broken).unwrap_or(0);
+        if let Some(m) = mob
+            && st.sink > 0.0
+        {
+            // Burrowing monsters dive under the ground (and come back up).
+            let target = if m.anim == MobAnim::Burrowed { 1.0 } else { 0.0 };
+            st.burrow += (target - st.burrow) * (1.0 - (-dt * 8.0).exp());
+            if let Ok(mut model) = models.get_mut(has.model) {
+                model.translation.y = -st.sink * st.burrow;
+            }
+        }
         let pos = transform.translation;
         let flat_speed = st
             .last_pos

@@ -21,5 +21,9 @@ Controles : ZQSD bouger, Espace sauter (double saut), Maj sprint, Ctrl glisser,
 A dash, clic gauche (maintenu) tirer, clic droit zoomer, E ouvrir/reanimer,
 1-4 choisir une carte, Echap pause.
 
-Dans le salon, choisis ton arme principale (clique dessus). L'argent gagne a la
-fin de chaque partie sert a debloquer de nouvelles armes.
+Dans le salon, choisis ton arme principale et ton arme automatique de depart
+(clique dessus). L'argent gagne a la fin de chaque partie sert a debloquer de
+nouvelles armes.
+
+Ce qui brille (orange, rose, cyan) sur un gros monstre est un point faible :
+degats x2 ou x3. Les carapaces et boucliers bloquent : contourne-les.

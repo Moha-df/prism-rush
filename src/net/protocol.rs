@@ -17,7 +17,7 @@ use crate::shared::build::{AutoWeapon, Loadout, MainWeapon, OfferCard};
 pub const DEFAULT_PORT: u16 = 7777;
 pub const MAX_PLAYERS: usize = 4;
 /// Protocol version: bump when messages change, so old clients are refused.
-pub const PROTOCOL_VERSION: u32 = 3;
+pub const PROTOCOL_VERSION: u32 = 4;
 
 // ---------------------------------------------------------------------------
 // Replicated components
@@ -60,6 +60,8 @@ pub struct Player {
     pub is_bot: bool,
     /// Main weapon chosen in the lobby (used at the start of the next run).
     pub main: MainWeapon,
+    /// Automatic weapon chosen in the lobby (owned from the start of the run).
+    pub start_auto: Option<AutoWeapon>,
 }
 
 /// The weapons of a player during a run (main weapon + automatic ones).
@@ -153,6 +155,13 @@ pub enum HazardKind {
     Fire,
     /// Wandering tornado (moves along `vel`).
     Tornado,
+    // --- Monster attacks (V4) ---
+    /// Marked circle that explodes after `life` seconds (mortar shells, magma).
+    Blast,
+    /// Acid pool hurting players standing in it.
+    AcidPool,
+    /// Burning lava left by the lava boar.
+    LavaPool,
 }
 
 /// An attack area, replicated once; clients animate it from its spawn tick.
@@ -184,7 +193,12 @@ impl Hazard {
     }
 
     pub fn is_player_weapon(&self) -> bool {
-        !matches!(self.kind, HazardKind::Shockwave | HazardKind::Lightning)
+        matches!(self.kind, HazardKind::Mine | HazardKind::Poison | HazardKind::Fire | HazardKind::Tornado)
+    }
+
+    /// Monster attack area with a radius and a lifetime.
+    pub fn enemy(kind: HazardKind, pos: Vec3, spawn_tick: u32, radius: f32, life: f32) -> Self {
+        Self { kind, pos, spawn_tick, radius, life, vel: Vec3::ZERO }
     }
 }
 
@@ -263,6 +277,16 @@ pub enum MobAnim {
     Move,
     Windup,
     Attack,
+    /// Underground (burrowers, sandworm): cannot be hit.
+    Burrowed,
+    /// Boss lying on the ground (legs broken, golem kneeling): vulnerable.
+    Toppled,
+}
+
+/// Broken legs of a boss (bit i = leg i), replicated so clients hide them.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct MobParts {
+    pub broken: u8,
 }
 
 /// Monster state replicated every tick.
@@ -294,6 +318,8 @@ pub enum ProjectileKind {
     // Monsters
     Acid,
     Bolt,
+    Thorn,
+    Shard,
     BossOrb,
     // Player main weapons
     Fireball,
@@ -369,6 +395,7 @@ pub struct Hello {
     pub version: u32,
     /// Main weapon picked in the menu.
     pub main: MainWeapon,
+    pub start_auto: Option<AutoWeapon>,
     /// Automatic weapons this player has unlocked (they can be offered).
     pub autos: Vec<AutoWeapon>,
 }
@@ -378,6 +405,7 @@ pub struct Hello {
 #[derive(Message, Clone, Debug, Serialize, Deserialize)]
 pub struct PickLoadout {
     pub main: MainWeapon,
+    pub start_auto: Option<AutoWeapon>,
     pub autos: Vec<AutoWeapon>,
 }
 
@@ -421,7 +449,12 @@ pub enum Reward {
 /// Server -> clients: transient visual/audio effects. Losing one is harmless.
 #[derive(Message, Clone, Debug, Serialize, Deserialize)]
 pub enum Fx {
-    Hit { pos: Vec3, amount: u16, crit: bool, killed: bool, by_slot: u8 },
+    /// `zone`: 0 body, 1 weak point, 2 armor.
+    Hit { pos: Vec3, amount: u16, crit: bool, killed: bool, by_slot: u8, zone: u8 },
+    /// Laser of a sentinel eye.
+    EnemyBeam { from: Vec3, to: Vec3 },
+    /// A boss leg broke.
+    PartBroken { pos: Vec3 },
     /// Beam of a main weapon (sniper).
     Tracer { slot: u8, weapon: MainWeapon, from: Vec3, to: Vec3, size: f32 },
     Explosion { pos: Vec3, radius: f32 },
@@ -461,6 +494,10 @@ pub enum GameEvent {
     SwarmStarted { black: bool },
     PowerupTaken { slot: u8, kind: PowerupKind, pos: Vec3 },
     ShrineCharged { pos: Vec3 },
+    /// First appearance of a monster type in this run (toast with a hint).
+    NewMonster { kind: MobKind },
+    /// A boss collapsed (legs broken): shoot it now!
+    BossToppled { kind: MobKind },
     GameOver(Box<RunSummary>),
 }
 
@@ -497,6 +534,7 @@ pub fn register_protocol(app: &mut App) {
         .replicate::<PendingChoice>()
         .replicate_once::<Mob>()
         .replicate::<MobState>()
+        .replicate::<MobParts>()
         .replicate_once::<Chest>()
         .replicate::<ChestOpen>()
         .replicate_once::<Projectile>()

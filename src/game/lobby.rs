@@ -16,7 +16,7 @@ use crate::bot::BotBrain;
 use crate::config::AppConfig;
 use crate::net::protocol::*;
 use crate::net::{LocalPlayer, NetRole};
-use crate::shared::build::{Loadout, MainWeapon};
+use crate::shared::build::{AutoWeapon, Loadout, MainWeapon};
 use crate::shared::economy;
 use crate::shared::items::{Inventory, PlayerStats};
 use crate::shared::sim::PlayerSim;
@@ -77,7 +77,7 @@ fn setup_server_match(
     let mut slot = 0u8;
     if *role == NetRole::Host {
         commands.spawn((
-            player_bundle(slot, config.name.clone(), false, Owner { client: Some(ClientId::Server) }, config.main_weapon),
+            player_bundle(slot, config.name.clone(), false, Owner { client: Some(ClientId::Server) }, config.main_weapon, config.start_auto),
             super::progress::AutoPool(config.auto_pool()),
         ));
         local.slot = Some(slot);
@@ -88,8 +88,9 @@ fn setup_server_match(
         // Bots take a starter weapon each (variety).
         let starters: Vec<MainWeapon> = MainWeapon::ALL.into_iter().filter(|w| w.def().starter).collect();
         let main = starters[i as usize % starters.len()];
+        let auto = AutoWeapon::ALL.into_iter().filter(|a| a.def().starter).nth(i as usize % 3);
         commands.spawn((
-            player_bundle(slot, name, true, Owner { client: None }, main),
+            player_bundle(slot, name, true, Owner { client: None }, main, auto),
             super::progress::AutoPool::default(),
             BotBrain::default(),
         ));
@@ -98,10 +99,10 @@ fn setup_server_match(
     info!("lobby open ({slot} players including bots)");
 }
 
-fn player_bundle(slot: u8, name: String, is_bot: bool, owner: Owner, main: MainWeapon) -> impl Bundle {
+fn player_bundle(slot: u8, name: String, is_bot: bool, owner: Owner, main: MainWeapon, start_auto: Option<AutoWeapon>) -> impl Bundle {
     (
         Replicated,
-        Player { slot, name, is_bot, main },
+        Player { slot, name, is_bot, main, start_auto },
         owner,
         InputQueue::default(),
         Intent::default(),
@@ -124,11 +125,11 @@ pub fn spawn_point(terrain: &Terrain, slot: u8) -> Vec3 {
 }
 
 /// Components a player needs during a run.
-fn run_components(terrain: &Terrain, slot: u8, main: MainWeapon) -> impl Bundle {
+fn run_components(terrain: &Terrain, slot: u8, main: MainWeapon, start_auto: Option<AutoWeapon>) -> impl Bundle {
     let stats = PlayerStats::from_inventory(&Inventory::default());
     (
         PlayerState { sim: PlayerSim::spawn_at(spawn_point(terrain, slot)), tick: 0, yaw: 0.0, pitch: 0.0 },
-        Gear(Loadout::new(main)),
+        Gear(Loadout::starting(main, start_auto)),
         super::autos::AutoState::default(),
         Health::new(stats.max_hp),
         Wallet::default(),
@@ -171,10 +172,11 @@ fn handle_hello(
                 pool.0.push(*a);
             }
         }
-        let mut entity = commands.spawn((player_bundle(slot, name, false, Owner { client: Some(client_id) }, main), pool));
+        let start_auto = hello.start_auto.filter(|a| pool.0.contains(a));
+        let mut entity = commands.spawn((player_bundle(slot, name, false, Owner { client: Some(client_id) }, main, start_auto), pool));
         // Join in progress: drop the newcomer into the world right away.
         if info.phase == Phase::Playing {
-            entity.insert(run_components(&terrain, slot, main));
+            entity.insert(run_components(&terrain, slot, main, start_auto));
         }
         welcome.write(ToClients {
             targets: SendTargets::Single(client_id),
@@ -228,6 +230,7 @@ fn handle_pick_main(
                     pool.0.push(*a);
                 }
             }
+            player.start_auto = pick.message.start_auto.filter(|a| pool.0.contains(a));
         }
     }
 }
@@ -252,7 +255,7 @@ pub fn start_match(
         SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1)
     });
     terrain.0 = Terrain::new(seed);
-    *director = Director::default();
+    *director = Director::new(seed);
     // Bosses whose time is already past (debug --start-time) are skipped.
     director.next_boss = crate::shared::economy::BOSS_TIMES.iter().filter(|t| **t <= config.start_time).count();
     *chests = ChestRegistry::default();
@@ -273,7 +276,7 @@ pub fn start_match(
     for (entity, player) in &players {
         commands
             .entity(entity)
-            .insert(run_components(&terrain, player.slot, player.main))
+            .insert(run_components(&terrain, player.slot, player.main, player.start_auto))
             .insert((PlayerScore::default(), InputQueue::default(), super::progress::LevelUps::default()));
     }
     info!("=== run started (seed {seed}, {} players) ===", players.iter().count());

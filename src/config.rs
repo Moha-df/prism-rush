@@ -32,6 +32,8 @@ pub struct AppConfig {
     pub volume: f32,
     pub bots: u8,
     pub autostart: bool,
+    /// Solo game: not announced in the public list.
+    pub solo: bool,
     pub headless: bool,
     pub duration: Option<f32>,
     pub seed: Option<u64>,
@@ -44,6 +46,8 @@ pub struct AppConfig {
     // --- Progression kept between runs (Megabonk-like meta) ---
     /// Starting main weapon picked in the lobby.
     pub main_weapon: MainWeapon,
+    /// Starting automatic weapon picked in the lobby.
+    pub start_auto: Option<AutoWeapon>,
     pub unlocked_mains: Vec<MainWeapon>,
     pub unlocked_autos: Vec<AutoWeapon>,
     /// Silver earned in runs, spent in the menu to unlock weapons.
@@ -88,6 +92,7 @@ impl Default for AppConfig {
             volume: 0.6,
             bots: 0,
             autostart: false,
+            solo: false,
             headless: false,
             duration: None,
             seed: None,
@@ -95,6 +100,7 @@ impl Default for AppConfig {
             autopilot: false,
             start_time: 0.0,
             main_weapon: MainWeapon::FireStaff,
+            start_auto: Some(AutoWeapon::Aura),
             unlocked_mains: Vec::new(),
             unlocked_autos: Vec::new(),
             silver: 0,
@@ -122,6 +128,7 @@ impl AppConfig {
                 "silver" => cfg.silver = value.parse().unwrap_or(0),
                 "unlocked_mains" => cfg.unlocked_mains = parse_list(value, &MainWeapon::ALL),
                 "unlocked_autos" => cfg.unlocked_autos = parse_list(value, &AutoWeapon::ALL),
+                "start_auto" => cfg.start_auto = parse_list(value, &AutoWeapon::ALL).first().copied(),
                 "main_weapon" => {
                     if let Some(w) = parse_list(value, &MainWeapon::ALL).first() {
                         cfg.main_weapon = *w;
@@ -133,12 +140,15 @@ impl AppConfig {
         if !cfg.is_unlocked_main(cfg.main_weapon) {
             cfg.main_weapon = MainWeapon::FireStaff;
         }
+        if cfg.start_auto.is_some_and(|a| !cfg.is_unlocked_auto(a)) {
+            cfg.start_auto = Some(AutoWeapon::Aura);
+        }
         cfg
     }
 
     pub fn save(&self) {
         let text = format!(
-            "name={}\nlast_address={}\nsensitivity={}\nfov={}\nvolume={}\nsilver={}\nmain_weapon={}\nunlocked_mains={}\nunlocked_autos={}\n",
+            "name={}\nlast_address={}\nsensitivity={}\nfov={}\nvolume={}\nsilver={}\nmain_weapon={}\nstart_auto={}\nunlocked_mains={}\nunlocked_autos={}\n",
             self.name,
             self.last_address,
             self.sensitivity,
@@ -146,6 +156,7 @@ impl AppConfig {
             self.volume,
             self.silver,
             self.main_weapon.index(),
+            self.start_auto.map(|a| a.index().to_string()).unwrap_or_default(),
             format_list(self.unlocked_mains.iter().map(|w| w.index())),
             format_list(self.unlocked_autos.iter().map(|a| a.index())),
         );

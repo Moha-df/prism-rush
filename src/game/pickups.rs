@@ -123,7 +123,7 @@ fn collect_powerups(
                         // Bosses only lose a slice of their health.
                         let amount = if mob.kind.is_boss() { health.max * 0.1 } else { health.hp + 1.0 };
                         let pos = state.pos + Vec3::Y * mob.kind.def().height * 0.5;
-                        damage.write(DamageMob { target: e, amount, crit: false, pos, by: None });
+                        damage.write(DamageMob { target: e, amount, crit: false, pos, by: None, zone: None });
                     }
                 }
                 fx.write(ToClients { targets: SendTargets::All, message: Fx::Explosion { pos: powerup.pos, radius: 6.0 } });

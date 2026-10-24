@@ -25,6 +25,7 @@ pub fn pose(tag: AnimTag, rest: &Transform, st: &AnimState, t: f32) -> Transform
     let ph = st.phase;
     let windup = st.action == MobAnim::Windup;
     let attack = st.action == MobAnim::Attack;
+    let toppled = st.action == MobAnim::Toppled;
     // 0 -> 1 over the first 0.2 s of an action: snappy but not instant.
     let ease = (st.action_time / 0.2).min(1.0);
 
@@ -51,8 +52,23 @@ pub fn pose(tag: AnimTag, rest: &Transform, st: &AnimState, t: f32) -> Transform
             let lift = p.cos().max(0.0) * 0.35 * move_amount;
             out.rotation = rest.rotation * Quat::from_rotation_y(p.sin() * 0.4 * move_amount) * Quat::from_rotation_z(lift);
         }
+        AnimTag::Breakable(i) => {
+            if st.broken & (1 << i) != 0 {
+                out.scale = Vec3::ZERO;
+            } else {
+                let p = ph * 1.4 + f32::from(i) * 0.25 * TAU;
+                let lift = p.cos().max(0.0) * 0.3 * move_amount;
+                out.rotation = rest.rotation * Quat::from_rotation_y(p.sin() * 0.3 * move_amount) * Quat::from_rotation_z(lift);
+            }
+        }
         AnimTag::Wing(offset) => {
             out.rotation = rest.rotation * Quat::from_rotation_z((t * 9.0 + offset * TAU).sin() * 0.45);
+        }
+        AnimTag::Body if toppled => {
+            // Collapsed / kneeling: the body drops to the ground and shakes.
+            let k = (st.action_time / 0.35).min(1.0);
+            out.translation.y = rest.translation.y * (1.0 - 0.5 * k);
+            out.rotation = rest.rotation * Quat::from_rotation_x(0.25 * k) * Quat::from_rotation_z((t * 7.0).sin() * 0.03);
         }
         AnimTag::Body => {
             let bounce = (ph.sin().abs() * 0.07 * move_amount) + (t * 2.0).sin() * 0.015;

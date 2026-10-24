@@ -84,6 +84,16 @@ On garde **le même monde procédural, le même moteur et le même netcode**.
 | V3.7 | Méta-progression : argent gagné à chaque partie, arsenal au salon (choix de l'arme de départ, déblocages), sauvegarde dans `settings.txt` | fait |
 | V3.8 | Bots adaptés, tests, docs, release, push | fait |
 
+## V4 — Bestiaire et points faibles
+
+| # | Contenu | État |
+|---|---------|------|
+| V4.1 | Salon : choix de l'arme automatique de départ ; Solo passe par le salon (choix des armes), sans être annoncé en ligne | fait |
+| V4.2 | 20 nouveaux monstres (3 variantes par rôle : petits rapides, gelées, tireurs ; kamikazes, tanks, soutien, chargeur), chacun avec sa mécanique | fait |
+| V4.3 | Roster tiré au sort par partie (quelques monstres par rôle, au moins un du début), ordre des boss aléatoire parmi 6, annonce des nouveaux monstres | fait |
+| V4.4 | Zones de dégâts : points faibles ×2/×3, carapaces et boucliers, pattes cassables, boss au sol (vulnérable), monstres sous terre (invulnérables) | fait |
+| V4.5 | 3 nouveaux boss (Mère-araignée, Golem ancien, Ver des sables), modèles, zones d'attaque au sol (mortier, magma, acide, lave), laser | fait |
+
 ## Reste à faire / idées
 
 - Équilibrage fin après des parties à plusieurs (armes, cadence des hordes, prix).
