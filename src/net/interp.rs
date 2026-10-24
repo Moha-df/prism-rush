@@ -135,6 +135,7 @@ pub struct LocalAvatar;
 /// Remote players and monsters: interpolated. Projectiles: computed from their trajectory.
 fn apply_interpolation(
     clock: Res<ServerClock>,
+    local: Res<LocalPlayer>,
     mut q: Query<(&InterpBuffer, &mut Transform), Without<LocalAvatar>>,
     mut projectiles: Query<(&Projectile, &mut Transform), Without<InterpBuffer>>,
 ) {
@@ -146,10 +147,12 @@ fn apply_interpolation(
         }
     }
     for (proj, mut transform) in &mut projectiles {
-        // Projectiles live "in the present" for their owner's feel; others see
-        // them at the interpolated time, consistent with monsters.
-        let p = proj.pos_at(tick.max(f64::from(proj.spawn_tick)));
-        let next = proj.pos_at(tick.max(f64::from(proj.spawn_tick)) + 1.0);
+        // Our own shots live "in the present" (they leave the weapon right
+        // away); the others are shown at the interpolated time, like monsters.
+        let t = if Some(proj.owner_slot) == local.slot { clock.estimate } else { tick };
+        let t = t.max(f64::from(proj.spawn_tick));
+        let p = proj.pos_at(t);
+        let next = proj.pos_at(t + 1.0);
         transform.translation = p;
         if let Some(dir) = (next - p).try_normalize() {
             transform.look_to(dir, Vec3::Y);

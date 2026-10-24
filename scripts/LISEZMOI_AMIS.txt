@@ -18,5 +18,8 @@ Si la partie n'apparait pas dans la liste : demande a ton ami de cliquer sur
 "code de la partie" du menu, puis clique sur Rejoindre.
 
 Controles : ZQSD bouger, Espace sauter (double saut), Maj sprint, Ctrl glisser,
-A dash, clic gauche tirer, clic droit zoomer, R recharger, E ouvrir/reanimer,
-1-6 ou molette changer d'arme, Echap pause.
+A dash, clic gauche (maintenu) tirer, clic droit zoomer, E ouvrir/reanimer,
+1-4 choisir une carte, Echap pause.
+
+Dans le salon, choisis ton arme principale (clique dessus). L'argent gagne a la
+fin de chaque partie sert a debloquer de nouvelles armes.
