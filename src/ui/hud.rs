@@ -1155,7 +1155,7 @@ fn update_feedback(
     }
 }
 
-/// Surviving until the Final Swarm (15:00) unlocks the next map, in our own
+/// Surviving until the Final Swarm (8:00) unlocks the next map, in our own
 /// settings file (like silver, unlocks belong to each player).
 fn unlock_next_map(
     mut commands: Commands,
@@ -1247,9 +1247,9 @@ fn toasts_from_events(
             GameEvent::ShrineCharged { .. } => ("Sanctuaire chargé : amélioration gratuite !".to_string(), crate::render::palette::GLOW_CYAN),
             GameEvent::SwarmStarted { black } => (
                 if *black {
-                    "20:00 — Plus que des fantômes NOIRS, de plus en plus rapides… Bravo d'être encore là !".to_string()
+                    "10:00 — Plus que des fantômes NOIRS, de plus en plus rapides… Bravo d'être encore là !".to_string()
                 } else {
-                    "15:00 — ESSAIM FINAL : les fantômes blancs arrivent. Survis !".to_string()
+                    "8:00 — ESSAIM FINAL : plus que des fantômes blancs. Survis !".to_string()
                 },
                 crate::render::palette::GLOW_MAGENTA,
             ),

@@ -33,7 +33,7 @@ impl Difficulty {
     pub fn description(self) -> &'static str {
         [
             "Monstres fragiles, lents et moins nombreux : pour découvrir le jeu.",
-            "L'expérience prévue : tenir 15 minutes demande un bon build.",
+            "L'expérience prévue : tenir 8 minutes demande un bon build.",
             "Les monstres foncent plus vite, les tireurs tirent plus souvent, ça tape plus fort.",
             "Hordes rapides et nombreuses, tirs en rafale. Pour les équipes rodées.",
             "Tout va vite, tout fait très mal. Bonne chance. Vraiment.",
@@ -118,7 +118,7 @@ impl MapKind {
         ][self.index()]
     }
 
-    /// The map after this one (unlocked by surviving 15 minutes here).
+    /// The map after this one (unlocked by surviving until the Final Swarm here).
     pub fn next(self) -> Option<MapKind> {
         Self::ALL.get(self.index() + 1).copied()
     }

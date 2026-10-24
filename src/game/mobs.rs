@@ -5,7 +5,7 @@
 //! run draws a random *roster* among the monsters of its map (a few per
 //! role, see `shared::mobs::roll_roster`) and a random order of the map's
 //! bosses, so two runs never look the same. Bosses come at fixed times,
-//! then the Final Swarm: white ghosts at 15:00, only black ghosts at 20:00.
+//! then the Final Swarm: only white ghosts at 8:00, only black ghosts at 10:00.
 //! The difficulty level and the totems scale everything (`shared::rules`).
 
 use std::collections::HashSet;
@@ -276,7 +276,7 @@ fn director(
         let mult = economy::swarm_mult(t);
         while dir.ghost_credits >= 1.0 {
             dir.ghost_credits -= 1.0;
-            // 15:00-20:00 white ghosts, then only black ones.
+            // 8:00-10:00 white ghosts, then only black ones.
             let kind = if swarm == 2 { MobKind::BlackGhost } else { MobKind::WhiteGhost };
             let pos = ring_point(&terrain, &mut dir.rng, &alive, 30.0, 40.0) + Vec3::Y * 2.0;
             let e = spawn_mob(&mut commands, kind, pos, level, tick.0, dir.rng.range(0.0, 100.0), false);
@@ -297,7 +297,8 @@ fn director(
         return;
     }
     dir.spawn_timer = dir.rng.range(0.5, 1.4);
-    let minutes = t / 60.0;
+    // Monster unlock minutes are in "paced" minutes (short runs).
+    let minutes = t * economy::PACE / 60.0;
     let options: Vec<MobKind> = dir
         .roster
         .iter()
@@ -319,7 +320,7 @@ fn director(
         let offset = Vec3::new(dir.rng.range(-3.0, 3.0), 0.0, dir.rng.range(-3.0, 3.0));
         let mut pos = center + offset;
         pos.y = terrain.wgen.ground_height(pos.x, pos.z) + if kind.def().flying { 6.0 } else { 0.2 };
-        let elite = dir.rng.chance((elite_chance(t) * rules.elite_mult()).min(0.6));
+        let elite = dir.rng.chance((elite_chance(t * economy::PACE) * rules.elite_mult()).min(0.6));
         let phase = dir.rng.range(0.0, 100.0);
         spawn_mob(&mut commands, kind, pos, level, tick.0, phase + i as f32, elite);
         dir.credits -= cost;

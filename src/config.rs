@@ -62,7 +62,7 @@ pub struct AppConfig {
     /// Difficulty and map picked in the lobby (host).
     pub difficulty: Difficulty,
     pub map: MapKind,
-    /// Number of maps unlocked (1 = only the first). Surviving 15 minutes on
+    /// Number of maps unlocked (1 = only the first). Surviving 8 minutes on
     /// a map unlocks the next one.
     pub maps_unlocked: usize,
 }

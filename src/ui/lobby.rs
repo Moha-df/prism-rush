@@ -144,7 +144,7 @@ fn refresh_rules(
     {
         let before = MapKind::ALL[locked.index() - 1];
         commands.spawn((
-            label(format!("Prochaine carte : {} — tiens 15 minutes sur {} pour la débloquer", locked.name(), before.name()), 15.0, TEXT_DIM),
+            label(format!("Prochaine carte : {} — tiens 8 minutes sur {} pour la débloquer", locked.name(), before.name()), 15.0, TEXT_DIM),
             ChildOf(panel),
         ));
     }

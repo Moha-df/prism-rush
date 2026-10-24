@@ -127,35 +127,38 @@ pub fn spawn_interval(wave: u32) -> f32 {
 
 /// The Final Swarm starts: white ghosts join the fight. Surviving until
 /// then unlocks the next map. From here on the run is meant to kill you.
-pub const FINAL_SWARM_TIME: f32 = 15.0 * 60.0;
+pub const FINAL_SWARM_TIME: f32 = 8.0 * 60.0;
 /// Only black ghosts spawn from now on (for broken builds only), faster
 /// and stronger every minute.
-pub const BLACK_GHOSTS_TIME: f32 = 20.0 * 60.0;
+pub const BLACK_GHOSTS_TIME: f32 = 10.0 * 60.0;
 /// Bosses arrive at these times (seconds).
-pub const BOSS_TIMES: [f32; 3] = [4.0 * 60.0, 8.0 * 60.0, 12.0 * 60.0];
+pub const BOSS_TIMES: [f32; 2] = [3.0 * 60.0, 5.0 * 60.0];
+/// The run is short (a typical run lasts ~5 minutes): monster unlocks,
+/// elites and the difficulty curve run this many times faster than real time.
+pub const PACE: f32 = 2.0;
 
 /// Difficulty coefficient: grows with time, faster with more players.
 pub fn time_difficulty(elapsed: f32, players: u32) -> f32 {
     let minutes = elapsed / 60.0;
     let player_factor = 1.0 + 0.15 * (players.max(1) - 1) as f32;
-    1.0 + minutes * 0.2 * player_factor
+    1.0 + minutes * 0.2 * PACE * player_factor
 }
 
 /// Monster level (drives HP and damage): +1 every 45 seconds.
 pub fn time_monster_level(elapsed: f32) -> u32 {
-    1 + (elapsed / 45.0) as u32
+    1 + (elapsed * PACE / 45.0) as u32
 }
 
 /// Spawn budget gained per second.
 pub fn spawn_rate(elapsed: f32, players: u32) -> f32 {
     // Megabonk-like hordes: automatic weapons need crowds to shine.
-    (0.6 + 0.4 * players.max(1) as f32) * (1.0 + elapsed / 60.0 * 0.6)
+    (0.6 + 0.4 * players.max(1) as f32) * (1.0 + elapsed * PACE / 60.0 * 0.6)
 }
 
 /// Max regular monsters alive at once (performance and network cap). During
 /// the Final Swarm it shrinks a little to leave room for the ghosts.
 pub fn max_alive_time(elapsed: f32, players: u32) -> usize {
-    let n = 14.0 + 6.0 * players.max(1) as f32 + elapsed / 60.0 * 8.0;
+    let n = 14.0 + 6.0 * players.max(1) as f32 + elapsed * PACE / 60.0 * 8.0;
     let cap = if elapsed >= FINAL_SWARM_TIME { 110 } else { 160 };
     (n as usize).min(cap)
 }
@@ -169,7 +172,7 @@ pub const MAX_MOBS: usize = 190;
 pub fn swarm_mult(elapsed: f32) -> f32 {
     let white = ((elapsed - FINAL_SWARM_TIME) / 60.0).max(0.0);
     let black = ((elapsed - BLACK_GHOSTS_TIME) / 60.0).max(0.0);
-    1.2f32.powf(white) * 1.15f32.powf(black)
+    1.4f32.powf(white) * 1.3f32.powf(black)
 }
 
 /// Ghosts spawned per second during the Final Swarm. White ghosts arrive
@@ -181,16 +184,16 @@ pub fn ghost_rate(elapsed: f32, players: u32) -> f32 {
         0.0
     } else if elapsed < BLACK_GHOSTS_TIME {
         let minutes = (elapsed - FINAL_SWARM_TIME) / 60.0;
-        (1.2 + 0.5 * p) * (1.0 + 0.5 * minutes)
+        (2.0 + 0.8 * p) * (1.0 + 1.0 * minutes)
     } else {
         let minutes = (elapsed - BLACK_GHOSTS_TIME) / 60.0;
         (2.0 + 0.7 * p) * (1.0 + 0.4 * minutes)
     }
 }
 
-/// Regular monsters stop coming once only black ghosts spawn.
+/// Regular monsters stop coming with the Final Swarm (only ghosts after 8:00).
 pub fn regular_spawns(elapsed: f32) -> bool {
-    elapsed < BLACK_GHOSTS_TIME
+    elapsed < FINAL_SWARM_TIME
 }
 
 /// XP needed to go from `level` to `level + 1` (team level).
@@ -270,8 +273,8 @@ mod tests {
         assert!(swarm_mult(30.0 * 60.0) > 20.0);
         // Ghost floods grow, and black ghosts come in force at 20:00.
         assert!(ghost_rate(BLACK_GHOSTS_TIME - 1.0, 1) > 2.0 * ghost_rate(FINAL_SWARM_TIME, 1));
-        assert!(regular_spawns(BLACK_GHOSTS_TIME - 1.0));
-        assert!(!regular_spawns(BLACK_GHOSTS_TIME));
+        assert!(regular_spawns(FINAL_SWARM_TIME - 1.0));
+        assert!(!regular_spawns(FINAL_SWARM_TIME));
         assert!(xp_to_next(10) > xp_to_next(2));
         assert!(chest_price_v3(ChestKind::Small, 5, 0.0) > chest_price_v3(ChestKind::Small, 0, 0.0));
         assert!(max_alive_time(1e6, 4) <= 160);
