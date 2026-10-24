@@ -41,9 +41,19 @@ src/
   ui/                menu, lobby, HUD, écran de fin
 ```
 
+## V2
+
+| # | Contenu | Statut |
+|---|---------|--------|
+| V2.1 | Système de vagues : fin de vague au dernier monstre, pause, prix par vague, retardataires ramenés, boss toutes les 5 vagues | ✅ |
+| V2.2 | 33 améliorations en 4 catégories et 4 raretés, coffres à 3 cartes au choix, icônes dessinées en code | ✅ |
+| V2.3 | 2 emplacements d'arme, armes au sol à échanger, 6 nouvelles armes (rafale, montée en régime, perforante, cloche, plasma) | ✅ |
+| V2.4 | Chargeur, Gelée, Chaman, élites, Reine de la ruche, Titan de foudre, statues d'invocation, coffre légendaire de boss | ✅ |
+| V2.5 | Ambiance jour/nuit par vague, nuages, SSAO + SMAA, faisceaux de coffres, impacts, flash de bouche | ✅ |
+| V2.6 | Bots (cartes, armes), tests, docs, release, push | ✅ |
+
 ## Reste à faire / idées
 
-- Équilibrage fin (difficulté des premières minutes, prix, dégâts des armes) après des parties à plusieurs.
-- Éclairage : ombres encore un peu sombres sous les plateformes, réglage de la lumière ambiante.
-- Tableau de fin de partie aligné (police à chasse fixe).
-- Possible : prédiction des roquettes côté client, plus de types de chunks, sons spatialisés.
+- Équilibrage fin après des parties à plusieurs (vagues tardives, prix, armes légendaires).
+- Prédiction des roquettes côté client ; sons spatialisés.
+- Plus de thèmes de chunks (biomes), plus d'affixes d'élites.

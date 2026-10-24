@@ -160,3 +160,46 @@ refusé. Version actuelle :
   `system_clipboard` pour coller l'IP avec Ctrl+V.
 - Le bot fonçait vers des coffres perchés inaccessibles : il ignore les coffres trop hauts,
   abandonne après 8 s, et combat en priorité si un monstre est proche.
+
+## V2
+
+- **Vagues plutôt que temps** : la difficulté, les prix et le niveau des monstres dépendent de
+  la vague (`economy.rs`).
+  - Le serveur garde un *budget* de spawn par vague (`Director`).
+  - La vague finit quand le budget est dépensé et qu'il ne reste aucun monstre.
+  - Les retardataires (à plus de 70 m, ou en vie plus de 30 s en fin de vague) sont **téléportés**
+    près des joueurs plutôt que tués : la vague se termine toujours, sans frustration.
+- **Cartes** : le coffre pose un composant répliqué `PendingChoice` sur le joueur. Le client
+  affiche les cartes et renvoie `ChooseCard { index }`. Le serveur valide puis applique.
+  Le serveur reste maître du tirage.
+- **Raretés** : chaque type de coffre a ses poids par rareté. Le Trèfle multiplie les poids
+  rares. Tirage en deux temps (rareté puis objet), sans doublon.
+- **33 objets mais un seul `PlayerStats::from_inventory`** : toujours une fonction pure.
+  - Les effets conditionnels (berserker, pointe creuse) passent par `conditional_damage`.
+  - Les effets d'événement (ankh, ronces, bouclier, soif de sang) sont gérés au bon endroit côté
+    serveur.
+- **Serde et tableaux > 32** : `[u8; 33]` n'est pas sérialisable par serde. Un petit module
+  `counts_serde` le (dé)sérialise comme une liste (et tolère une autre longueur).
+- **Icônes dessinées en code** (`render/icons.rs`) :
+  - un mini moteur 2D : formes définies par une fonction « suis-je dedans ? » ;
+  - anticrénelage par sur-échantillonnage 4×4 ;
+  - contour sombre façon autocollant ;
+  - conversion en `Image` Bevy.
+  Zéro fichier, et facile d'ajouter une icône.
+- **2 armes max** : `Arsenal::give` renvoie l'arme remplacée, que le serveur fait tomber au sol
+  (`WeaponPickup`, répliqué une fois). Rafales, montée en régime (minigun), perforation (railgun)
+  et projectiles à gravité restent dans la simulation partagée, donc prédits côté client.
+- **Hazards de boss** (`Hazard`) : répliqués une seule fois avec leur tick de départ. Le client
+  anime l'onde de choc à l'heure *présente* du serveur (`ServerClock::estimate`), pour que le
+  moment où il faut sauter soit exactement celui où elle touche. Le serveur ne la fait toucher que
+  les joueurs au sol.
+- **Élites** : un simple booléen dans `Mob`, avec des multiplicateurs de PV, dégâts et or. Le
+  visuel (aura, couronne, taille ×1,3) est ajouté au modèle à la volée.
+- **Ambiance par vague** (`render/atmosphere.rs`) : 4 « moods » (soleil, brouillard, ambiance,
+  teinte du ciel, nuages). Chaque mood est tenu pendant la moitié de ses vagues, puis on passe
+  progressivement au suivant. Un test vérifie qu'il n'y a pas de saut de lumière (il a détecté une
+  aube trop brutale).
+- **SSAO** : demande `Msaa::Off`. SMAA (post-process) lisse les bords à la place.
+- **Tests visuels** : en mode `--shots`, une scène de démo (`render/debug.rs`) fait apparaître
+  chaque nouveau monstre, une statue, une arme au sol et un choix de cartes, puis prend des
+  captures. C'est ce qui a permis de vérifier le rendu sans jouer.

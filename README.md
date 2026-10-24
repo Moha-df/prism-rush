@@ -94,55 +94,141 @@ Les touches suivent la **position** physique : ZQSD sur AZERTY, WASD sur QWERTY.
 | Dash | **A** (touche Q en QWERTY) ou bouton latéral de souris |
 | Tirer / Zoomer | **Clic gauche** / **Clic droit** |
 | Recharger | **R** |
-| Ouvrir un coffre / Réanimer (maintenir) | **E** |
-| Changer d'arme | **1 à 6** ou **molette** |
+| Ouvrir un coffre / Prendre une arme / Réveiller une statue / Réanimer (maintenir) | **E** |
+| Choisir une carte d'amélioration | **Clic** ou **1 2 3 4** |
+| Changer d'arme (2 emplacements) | **1 / 2** ou **molette** |
 | Pause (sensibilité, volume, FOV) | **Échap** |
 
-**Techniques** : enchaîne glissade puis saut pour garder ta vitesse. Les dashs se rechargent
-tout seuls. Les tremplins turquoise t'envoient en l'air, et les coffres d'armes sont souvent en
-hauteur.
+**Techniques** :
+- enchaîne glissade puis saut pour garder ta vitesse ;
+- les dashs se rechargent tout seuls ;
+- les tremplins turquoise t'envoient en l'air ;
+- les bons coffres sont souvent en hauteur, repère leurs **faisceaux lumineux** de loin ;
+- les ondes de choc du Titan se **sautent**.
 
 ---
 
-## 4. Le jeu
+## 4. Le jeu (V2)
 
-- **Argent** : chaque monstre tué rapporte de l'or **à tous les joueurs** (portefeuilles
-  individuels). Pas de vol de kill, et chacun décide de ses achats.
-- **Coffres d'objets** (doré) et **coffres d'armes** (acier et turquoise, plus chers). Leur prix
-  augmente avec le temps.
-- **Difficulté** : elle monte avec le temps, et plus vite à plusieurs. Il y a plus de monstres,
-  ils sont plus résistants et de nouveaux types arrivent. Un **boss** apparaît toutes les 5 minutes.
-- **À terre** : un coéquipier te relève en maintenant E près de toi. Si tout le monde est à terre,
-  c'est **game over**, avec les statistiques, puis retour au salon.
+### Vagues
 
-**15 objets cumulables** : Plume (+1 saut), Bottes véloces (vitesse), Chargeur étendu,
-Mains agiles (rechargement), Balles lourdes (dégâts), Cœur vital (PV max), Mousse régénérante,
-Gâchette sensible (cadence), Lentille critique, Plaque d'armure, Propulseur (+1 dash),
-Croc vampire (vol de vie), Pièce fétiche (+or), Obus instables (explosions), Ressort (hauteur de
-saut).
+- La partie est une suite de **vagues**. Une vague se termine quand son **dernier monstre** meurt.
+- Ensuite, une **pause de 12 s** te laisse acheter, puis la vague suivante, plus dure, commence.
+- Les monstres trop loin, ou qui survivent trop longtemps en fin de vague, sont **ramenés près de
+  vous** : pas de chasse interminable. Quand il en reste 3 ou moins, des marqueurs ▼ indiquent où
+  ils sont.
+- **Toutes les 5 vagues : un boss.** Dans l'ordre : Colosse, Reine de la ruche, Titan de foudre,
+  puis on recommence, en plus fort.
+- **Le prix des coffres augmente à chaque vague.**
+- **L'ambiance change avec les vagues** : après-midi doré, coucher de soleil, crépuscule violet,
+  nuit… puis retour au jour.
 
-**6 armes** : Pistolet, Mitraillette, Fusil à pompe, Fusil d'assaut, Sniper, Lance-roquettes.
+### Argent
 
-**Monstres** :
+Chaque monstre tué rapporte de l'or **à tous les joueurs** (portefeuilles individuels). Pas de vol
+de kill, et chacun décide de ses achats. Les **élites** (auréole dorée, à partir de la vague 3)
+valent 3 fois plus.
+
+### Coffres et cartes
+
+| Coffre | Faisceau | Contenu |
+|---|---|---|
+| Petit coffre (bois) | — | 3 cartes, surtout communes |
+| Grand coffre (or) | orange | 3 cartes, meilleures raretés |
+| Coffre légendaire (violet) | magenta | 3 cartes épiques ou légendaires (aussi lâché par chaque boss) |
+| Caisse d'arme (acier) | turquoise | une arme posée au sol |
+
+Ouvrir un coffre montre **3 cartes d'amélioration** (4 avec la Couronne du roi). Tu en choisis une.
+Le jeu continue pendant ce temps !
+
+### 33 améliorations, en 4 catégories et 4 raretés
+
+Raretés : commun, rare, épique, légendaire. Chaque amélioration a son icône dessinée en code.
+
+- **Mobilité** :
+  - Pattes de grenouille (+1 saut en l'air) ;
+  - Jetpack (hauteur de saut) ;
+  - Bottes de course ;
+  - Propulseur (+1 dash) ;
+  - Bobine de dash ;
+  - Cire de glisse ;
+  - Cape plume (contrôle en l'air) ;
+  - Pas fantôme (invincible en dash).
+- **Offensif** :
+  - Balles lourdes ;
+  - Gâchette sensible ;
+  - Lunette critique ;
+  - Hache du bourreau (dégâts critiques) ;
+  - Obus instables (explosions) ;
+  - Bobine Tesla (arcs électriques) ;
+  - Pointe creuse ;
+  - Masque du berserker ;
+  - Soif de sang (vitesse après un kill) ;
+  - Âme de gatling.
+- **Défensif** :
+  - Cœur vital ;
+  - Mousse régénérante ;
+  - Plaque d'armure ;
+  - Canines de vampire (vol de vie) ;
+  - Bouclier d'énergie ;
+  - Ronces (renvoi de dégâts) ;
+  - Ankh (te relève une fois) ;
+  - Cœur de dragon.
+- **Utilitaire** :
+  - Pièce fétiche (+or) ;
+  - Chargeur étendu ;
+  - Mains agiles (rechargement) ;
+  - Carte au trésor (coffres moins chers) ;
+  - Trèfle à 4 feuilles (chance) ;
+  - Trousse de soin ;
+  - Couronne du roi (+1 carte).
+
+### Armes : 2 emplacements
+
+Les caisses d'arme posent l'arme **au sol**. Appuie sur **E** pour la prendre. Si tu as déjà 2 armes,
+celle que tu tiens **tombe au sol** à la place, et un coéquipier peut la récupérer.
+
+| Rareté | Armes |
+|---|---|
+| Commun | Pistolet, Mitraillette, Revolver |
+| Rare | Fusil à pompe, Fusil d'assaut, Fusil à rafale (3 coups) |
+| Épique | Sniper, Lance-grenades (en cloche), Fusil plasma |
+| Légendaire | Lance-roquettes, Minigun (monte en régime), Railgun (traverse tous les ennemis) |
+
+### Monstres
 
 | Monstre | Rôle |
 |---|---|
 | Trotteur | Araignée rapide en meute |
+| Gelée | Se divise en deux petites gelées à sa mort |
 | Cracheur | Plante-canon qui tire de l'acide en cloche |
 | Feu follet | Orbe volant qui tire des éclairs |
+| Chargeur | Rhinocéros de cristal : il gratte le sol puis **fonce en ligne droite**, écarte-toi ! |
 | Bombeur | Bombe sur pattes qui explose au contact |
+| Chaman | Masque flottant qui **soigne** les autres monstres : à abattre en premier |
 | Brute | Tank qui frappe le sol |
-| **Colosse** | Boss : frappe au sol et salves de projectiles |
+| **Colosse** (boss) | Frappe au sol et salves de projectiles |
+| **Reine de la ruche** (boss) | Vole, invoque des essaims, tire des éventails d'éclairs |
+| **Titan de foudre** (boss) | Ondes de choc au sol (**saute** !) et foudre annoncée par un cercle |
 
-Tous **télégraphient** leurs attaques : ils se figent, gonflent ou lèvent les bras. Regarde-les
-pour esquiver.
+Tous les monstres **télégraphient** leurs attaques. Regarde-les pour esquiver.
+
+### Statues
+
+Des **statues de boss** sont dispersées dans le monde. Appuie sur **E** pour en réveiller une : son
+boss apparaît immédiatement. C'est un pari risqué, mais chaque boss lâche un **coffre légendaire**.
+
+### À terre
+
+Un coéquipier te relève en maintenant E près de toi. Si tout le monde est à terre, c'est
+**game over**, avec les statistiques, puis retour au salon.
 
 ---
 
 ## 5. Pour les curieux / développeurs
 
 ```bash
-cargo test --lib                     # 67 tests : monde déterministe, mouvement, armes, économie, réseau...
+cargo test --lib                     # 79 tests : monde déterministe, mouvement, armes, économie, réseau...
 cargo clippy --all-targets           # aucun avertissement
 cargo run --release -- server --headless --bots 3 --autostart --duration 120   # partie sans fenêtre
 cargo run --release -- bot                                                     # client bot : rejoint la 1re partie de la liste
