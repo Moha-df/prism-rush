@@ -130,13 +130,17 @@ Il n'y a **pas de fin** : le but est de **survivre le plus longtemps possible**.
 
 **5 niveaux de difficulté** (flèches `<` `>` dans le salon, en solo comme en multi) :
 
-| Niveau | Monstres | Argent gagné |
-|---|---|---|
-| Facile | PV ×0,6, dégâts ×0,5, moins nombreux | ×0,5 |
-| Normal | l'expérience prévue | ×1 |
-| Difficile | PV ×1,45, dégâts ×1,3, plus nombreux | ×1,4 |
-| Cauchemar | PV ×2,1, dégâts ×1,7, hordes énormes | ×1,9 |
-| Impossible | PV ×3,2, dégâts ×2,4, élites partout | ×2,6 |
+La vie des monstres change peu (entre ×0,5 et ×1,5) : les niveaux difficiles se jouent surtout
+sur la **vitesse** des monstres qui foncent sur toi (araignées, chargeurs, kamikazes, fantômes...),
+la **cadence de tir** des tireurs, les **dégâts** et le **nombre** de monstres.
+
+| Niveau | PV | Dégâts | Vitesse (ceux qui foncent) | Cadence (ceux qui tirent) | Nombre | Argent gagné |
+|---|---|---|---|---|---|---|
+| Facile | ×0,5 | ×0,5 | ×0,85 | ×0,75 | ×0,75 | ×0,5 |
+| Normal | ×1 | ×1 | ×1 | ×1 | ×1 | ×1 |
+| Difficile | ×1,15 | ×1,4 | ×1,12 | ×1,2 | ×1,2 | ×1,4 |
+| Cauchemar | ×1,3 | ×1,9 | ×1,25 | ×1,45 | ×1,45 | ×1,9 |
+| Impossible | ×1,5 | ×2,6 | ×1,4 | ×1,75 | ×1,8 | ×2,6 |
 
 **3 cartes**, chacune avec son ambiance, **ses propres monstres et ses 3 boss** :
 
@@ -147,14 +151,15 @@ Il n'y a **pas de fin** : le but est de **survivre le plus longtemps possible**.
 | Marais maudit | brume verte, nuit noire | gelées toxiques, champignons, yeux, méduses célestes, golems de cristal, invocateurs | Titan de foudre, Mère-araignée, Reine de la ruche |
 
 Au début, seule la Prairie est disponible. **Survivre 15 minutes** sur une carte débloque la
-suivante (sur ton PC). Les cartes suivantes sont un peu plus dures et rapportent plus d'argent.
+suivante (sur ton PC). Les cartes suivantes sont un peu plus dures (monstres un peu plus rapides et
+plus forts, mêmes PV) et rapportent plus d'argent.
 
 ### Totems de défi
 
 Des **totems** (obélisques sombres aux runes rouges, surmontés d'un crâne à cornes) sont
 dispersés sur la carte. Appuie sur **E** pour en activer un : **pour toute l'équipe et jusqu'à
-la fin de la partie**, les monstres ont **+12 % de PV**, **+8 % de dégâts** et sont **10 % plus
-nombreux**… mais vous gagnez **+0,4 de chance** (de meilleures raretés dans les coffres et les
+la fin de la partie**, les monstres font **+8 % de dégâts**, sont **10 % plus nombreux**, ceux qui
+foncent sont **3 % plus rapides** et ceux qui tirent tirent **5 % plus souvent**… mais vous gagnez **+0,4 de chance** (de meilleures raretés dans les coffres et les
 cartes de niveau) et **+8 % d'or et d'XP**. Ça se cumule : à vous de voir jusqu'où vous osez aller.
 Le nombre de totems actifs s'affiche sous le chrono.
 

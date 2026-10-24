@@ -402,8 +402,11 @@ fn mob_ai(
     mut fx: MessageWriter<ToClients<Fx>>,
     info: Query<&MatchInfo>,
 ) {
-    // Damage of the difficulty, map and totems.
-    let rules_dmg = info.single().map(|m| m.rules.damage_mult()).unwrap_or(1.0);
+    // Damage, rush speed and fire rate of the difficulty, map and totems.
+    let rules = info.single().map(|m| m.rules).unwrap_or_default();
+    let rules_dmg = rules.damage_mult();
+    let rush_speed = rules.rush_speed_mult();
+    let fire_rate = rules.fire_rate_mult();
     let targets: Vec<(Entity, Vec3, Vec3)> = players
         .iter()
         .filter(|(_, _, h)| !h.downed)
@@ -618,7 +621,9 @@ fn mob_ai(
                 }
                 ai.windup -= DT;
                 if ai.windup <= 0.0 {
-                    ai.cooldown = def.attack_cooldown;
+                    // Shooters fire more often on harder levels (the wind-up
+                    // stays the same, so attacks remain readable).
+                    ai.cooldown = if def.ranged { def.attack_cooldown / fire_rate } else { def.attack_cooldown };
                     ai.attack_anim = 0.35;
                     let eye = state.pos + Vec3::Y * def.height * 0.7;
                     ai.attacks += 1;
@@ -850,6 +855,11 @@ fn mob_ai(
                     HazardServer::new(damage_amount * 0.25),
                 ));
             }
+        }
+
+        // Monsters that rush you are faster on harder levels.
+        if !def.ranged {
+            want *= rush_speed;
         }
 
         // --- Physics.

@@ -32,22 +32,34 @@ impl Difficulty {
 
     pub fn description(self) -> &'static str {
         [
-            "Monstres fragiles et moins nombreux : pour découvrir le jeu.",
+            "Monstres fragiles, lents et moins nombreux : pour découvrir le jeu.",
             "L'expérience prévue : tenir 15 minutes demande un bon build.",
-            "Monstres plus solides et plus nombreux. Plus d'argent en fin de partie.",
-            "Hordes énormes qui frappent fort. Pour les équipes rodées.",
-            "Bonne chance. Vraiment.",
+            "Les monstres foncent plus vite, les tireurs tirent plus souvent, ça tape plus fort.",
+            "Hordes rapides et nombreuses, tirs en rafale. Pour les équipes rodées.",
+            "Tout va vite, tout fait très mal. Bonne chance. Vraiment.",
         ][self.index()]
     }
 
-    /// Monster HP multiplier.
+    /// Monster HP multiplier. Kept between 0.5 and 1.5 on purpose: harder
+    /// levels are about speed and danger, not about bullet sponges.
     pub fn hp(self) -> f32 {
-        [0.6, 1.0, 1.45, 2.1, 3.2][self.index()]
+        [0.5, 1.0, 1.15, 1.3, 1.5][self.index()]
     }
 
     /// Monster damage multiplier.
     pub fn damage(self) -> f32 {
-        [0.5, 1.0, 1.3, 1.7, 2.4][self.index()]
+        [0.5, 1.0, 1.4, 1.9, 2.6][self.index()]
+    }
+
+    /// Movement speed of the monsters that rush you (melee, chargers,
+    /// bombers, ghosts).
+    pub fn rush_speed(self) -> f32 {
+        [0.85, 1.0, 1.12, 1.25, 1.4][self.index()]
+    }
+
+    /// Attack rate of the monsters that shoot (cooldown divided by this).
+    pub fn fire_rate(self) -> f32 {
+        [0.75, 1.0, 1.2, 1.45, 1.75][self.index()]
     }
 
     /// Spawn speed multiplier (more monsters, more ghosts).
@@ -111,13 +123,18 @@ impl MapKind {
         Self::ALL.get(self.index() + 1).copied()
     }
 
-    /// Later maps hit a bit harder, whatever the difficulty.
-    pub fn hp(self) -> f32 {
-        [1.0, 1.15, 1.3][self.index()]
-    }
-
+    /// Later maps are a bit faster and hit a bit harder, whatever the
+    /// difficulty (same HP: see `Difficulty::hp`).
     pub fn damage(self) -> f32 {
         [1.0, 1.1, 1.2][self.index()]
+    }
+
+    pub fn rush_speed(self) -> f32 {
+        [1.0, 1.04, 1.08][self.index()]
+    }
+
+    pub fn fire_rate(self) -> f32 {
+        [1.0, 1.05, 1.1][self.index()]
     }
 
     pub fn silver(self) -> f32 {
@@ -167,10 +184,12 @@ impl MapKind {
     }
 }
 
-/// Each activated totem makes monsters this much tougher and more numerous...
-pub const TOTEM_HP: f32 = 0.12;
+/// Each activated totem makes monsters this much faster, deadlier and more
+/// numerous (not tougher: HP stay within 0.5-1.5)...
 pub const TOTEM_DAMAGE: f32 = 0.08;
 pub const TOTEM_SPAWNS: f32 = 0.10;
+pub const TOTEM_SPEED: f32 = 0.03;
+pub const TOTEM_FIRE_RATE: f32 = 0.05;
 /// ...and gives the team this much luck (1 luck = one Clover) and rewards.
 pub const TOTEM_LUCK: f32 = 0.4;
 pub const TOTEM_REWARDS: f32 = 0.08;
@@ -186,11 +205,21 @@ pub struct RunRules {
 
 impl RunRules {
     pub fn hp_mult(&self) -> f32 {
-        self.difficulty.hp() * self.map.hp() * (1.0 + TOTEM_HP * self.totems as f32)
+        self.difficulty.hp()
     }
 
     pub fn damage_mult(&self) -> f32 {
         self.difficulty.damage() * self.map.damage() * (1.0 + TOTEM_DAMAGE * self.totems as f32)
+    }
+
+    /// Speed of the monsters that rush you (capped: past that it is unplayable).
+    pub fn rush_speed_mult(&self) -> f32 {
+        (self.difficulty.rush_speed() * self.map.rush_speed() * (1.0 + TOTEM_SPEED * self.totems as f32)).min(1.8)
+    }
+
+    /// Attack rate of the monsters that shoot.
+    pub fn fire_rate_mult(&self) -> f32 {
+        (self.difficulty.fire_rate() * self.map.fire_rate() * (1.0 + TOTEM_FIRE_RATE * self.totems as f32)).min(2.5)
     }
 
     pub fn spawn_mult(&self) -> f32 {
@@ -227,6 +256,15 @@ mod tests {
             assert!(pair[1].hp() > pair[0].hp());
             assert!(pair[1].damage() > pair[0].damage());
             assert!(pair[1].spawns() > pair[0].spawns());
+            assert!(pair[1].rush_speed() > pair[0].rush_speed());
+            assert!(pair[1].fire_rate() > pair[0].fire_rate());
+        }
+        // HP always between 0.5 and 1.5, whatever the map and the totems.
+        for difficulty in Difficulty::ALL {
+            for map in MapKind::ALL {
+                let r = RunRules { difficulty, map, totems: 20 };
+                assert!((0.5..=1.5).contains(&r.hp_mult()), "{r:?}");
+            }
         }
         assert_eq!(Difficulty::Impossible.harder(), Difficulty::Impossible);
         assert_eq!(Difficulty::Easy.easier(), Difficulty::Easy);
@@ -236,7 +274,9 @@ mod tests {
     fn totems_trade_danger_for_luck() {
         let calm = RunRules::default();
         let cursed = RunRules { totems: 3, ..calm };
-        assert!(cursed.hp_mult() > calm.hp_mult());
+        assert!(cursed.damage_mult() > calm.damage_mult());
+        assert!(cursed.rush_speed_mult() > calm.rush_speed_mult());
+        assert!(cursed.fire_rate_mult() > calm.fire_rate_mult());
         assert!(cursed.spawn_mult() > calm.spawn_mult());
         assert!(cursed.luck_bonus() > calm.luck_bonus());
         assert!(cursed.reward_mult() > calm.reward_mult());

@@ -567,8 +567,8 @@ fn update_prompt(
         } else if totems.iter().any(|(t, u)| !u.0 && t.pos.distance(pos) < TOTEM_RANGE) {
             let n = info.single().map(|m| m.rules.totems).unwrap_or(0);
             text = format!(
-                "[E] Activer le totem — monstres +{:.0}% PV et plus nombreux, mais chance +{:.0}% et récompenses +{:.0}% (actifs : {n})",
-                crate::shared::rules::TOTEM_HP * 100.0,
+                "[E] Activer le totem — monstres +{:.0}% dégâts, plus rapides et plus nombreux, mais chance +{:.0}% et récompenses +{:.0}% (actifs : {n})",
+                crate::shared::rules::TOTEM_DAMAGE * 100.0,
                 crate::shared::rules::TOTEM_LUCK * 35.0,
                 crate::shared::rules::TOTEM_REWARDS * 100.0
             );
